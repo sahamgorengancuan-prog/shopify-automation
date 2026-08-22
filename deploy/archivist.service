@@ -1,0 +1,19 @@
+[Unit]
+Description=ARCHIVIST apparel design pipeline (Gradio)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/archivist
+EnvironmentFile=-/opt/archivist/.env
+ExecStart=/opt/archivist/.venv/bin/python -m archivist.app --host 0.0.0.0 --port 7860
+Restart=on-failure
+RestartSec=5
+# The scheduler keeps running between requests, so give it a clean stop.
+KillSignal=SIGINT
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

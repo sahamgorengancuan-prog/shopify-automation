@@ -1,0 +1,10 @@
+# ARCHIVIST — apparel design pipeline
+# Python 3.10+ (tested on 3.11, 3.13 and 3.14)
+
+gradio>=5.0                # the control room; 5.x and 6.x are both supported
+Pillow>=10.4               # every measurement, every print file
+requests>=2.32             # HTTP with retries (urllib is the fallback)
+
+# Optional, picked up automatically when installed:
+ddgs>=9.0                  # keeps up with DuckDuckGo endpoint changes
+python-dotenv>=1.0         # stricter .env parsing than the built-in fallback
