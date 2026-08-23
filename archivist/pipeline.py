@@ -151,8 +151,10 @@ def run(
 
     try:
         llm = LLM(
-            settings.anthropic_api_key,
-            model=settings.anthropic_model,
+            settings.openai_api_key,
+            model=settings.openai_model,
+            base_url=settings.openai_base_url,
+            reasoning_effort=settings.openai_reasoning_effort,
             enabled=options.use_llm and settings.can_use_llm,
         )
 

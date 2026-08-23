@@ -1,8 +1,12 @@
-"""Optional creative-director assist.
+"""Optional creative-director assist — OpenAI (GPT-5.1).
 
-Every stage works without it — the LLM only *refines* what the deterministic
-pipeline already produced, and any failure silently falls back. That keeps the
-run reproducible offline and stops a missing key from breaking a scheduled job.
+Every stage works without it: the LLM only *refines* what the deterministic
+pipeline already produced, and any failure silently falls back. That keeps runs
+reproducible offline and stops a missing key from breaking a scheduled job.
+
+Transport: the Responses API first (what the GPT-5 family is built around), with
+Chat Completions as the fallback so OpenAI-compatible gateways, Azure-style
+proxies and older deployments keep working.
 """
 
 from __future__ import annotations
@@ -14,8 +18,11 @@ from typing import Any
 from . import http
 from .models import ArtDirection, Cluster, NicheLadder, Reference, VisualDNA
 
-API_URL = "https://api.anthropic.com/v1/messages"
-API_VERSION = "2023-06-01"
+DEFAULT_BASE_URL = "https://api.openai.com/v1"
+DEFAULT_MODEL = "gpt-5.1"
+
+# Models worth offering in the UI. The first entry is the default.
+KNOWN_MODELS = ["gpt-5.1", "gpt-5.1-mini", "gpt-5", "gpt-5-mini", "gpt-4.1", "gpt-4.1-mini"]
 
 SYSTEM = (
     "You are an art director for an independent apparel label that publishes designs as if they "
@@ -25,7 +32,7 @@ SYSTEM = (
 
 
 def _extract_json(text: str) -> Any:
-    text = text.strip()
+    text = (text or "").strip()
     if text.startswith("```"):
         text = re.sub(r"^```[a-zA-Z]*\n|\n```$", "", text).strip()
     try:
@@ -40,38 +47,140 @@ def _extract_json(text: str) -> Any:
             return None
 
 
-class LLM:
-    """Thin Anthropic Messages wrapper with graceful degradation."""
+def _text_from_responses(payload: dict) -> str:
+    """Pull the assistant text out of a Responses API result.
 
-    def __init__(self, api_key: str = "", model: str = "claude-opus-5", *, timeout: int = 60,
-                 max_tokens: int = 1500, enabled: bool = True):
+    Reasoning models return a list of output items; only the message items carry
+    text, and `output_text` is a convenience field some deployments add.
+    """
+    if isinstance(payload.get("output_text"), str) and payload["output_text"].strip():
+        return payload["output_text"]
+
+    chunks: list[str] = []
+    for item in payload.get("output", []) or []:
+        if not isinstance(item, dict):
+            continue
+        for part in item.get("content", []) or []:
+            if isinstance(part, dict) and part.get("type") in {"output_text", "text"}:
+                chunks.append(str(part.get("text", "")))
+    return "".join(chunks)
+
+
+def _text_from_chat(payload: dict) -> str:
+    choices = payload.get("choices") or []
+    if not choices:
+        return ""
+    message = choices[0].get("message") or {}
+    content = message.get("content")
+    if isinstance(content, list):  # some gateways return content parts
+        return "".join(str(part.get("text", "")) for part in content if isinstance(part, dict))
+    return str(content or "")
+
+
+class LLM:
+    """Thin OpenAI wrapper with graceful degradation."""
+
+    def __init__(
+        self,
+        api_key: str = "",
+        model: str = DEFAULT_MODEL,
+        *,
+        base_url: str = DEFAULT_BASE_URL,
+        reasoning_effort: str = "low",
+        timeout: int = 60,
+        max_tokens: int = 2000,
+        enabled: bool = True,
+    ):
         self.api_key = api_key
-        self.model = model
+        self.model = model or DEFAULT_MODEL
+        self.base_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
+        self.reasoning_effort = reasoning_effort
         self.timeout = timeout
         self.max_tokens = max_tokens
         self.enabled = enabled
         self.last_error = ""
+        # Learned at runtime so a deployment is only probed once per process.
+        self._use_chat_api = False
 
     @property
     def available(self) -> bool:
         return bool(self.api_key) and self.enabled
 
-    def complete(self, prompt: str, *, max_tokens: int | None = None) -> str:
-        payload = {
+    @property
+    def headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+
+    # -- transport --------------------------------------------------------
+    def _responses(self, prompt: str, max_tokens: int, *, json_mode: bool) -> str:
+        payload: dict[str, Any] = {
             "model": self.model,
-            "max_tokens": max_tokens or self.max_tokens,
-            "system": SYSTEM,
-            "messages": [{"role": "user", "content": prompt}],
+            "instructions": SYSTEM,
+            "input": prompt,
+            "max_output_tokens": max_tokens,
         }
-        response = http.post_json(
-            API_URL,
-            payload,
-            headers={"x-api-key": self.api_key, "anthropic-version": API_VERSION},
-            timeout=self.timeout,
-            retries=2,
-        )
-        parts = response.get("content", [])
-        return "".join(part.get("text", "") for part in parts if part.get("type") == "text")
+        if self.reasoning_effort:
+            payload["reasoning"] = {"effort": self.reasoning_effort}
+        if json_mode:
+            payload["text"] = {"format": {"type": "json_object"}}
+
+        try:
+            result = http.post_json(
+                f"{self.base_url}/responses", payload, headers=self.headers,
+                timeout=self.timeout, retries=2,
+            )
+        except http.HttpError as exc:
+            # Drop the optional knobs an older model or gateway may reject, once.
+            if exc.status == 400 and ("reasoning" in exc.body or "text.format" in exc.body or "format" in exc.body):
+                payload.pop("reasoning", None)
+                payload.pop("text", None)
+                result = http.post_json(
+                    f"{self.base_url}/responses", payload, headers=self.headers,
+                    timeout=self.timeout, retries=1,
+                )
+            else:
+                raise
+        return _text_from_responses(result)
+
+    def _chat(self, prompt: str, max_tokens: int, *, json_mode: bool) -> str:
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": SYSTEM},
+                {"role": "user", "content": prompt},
+            ],
+            "max_completion_tokens": max_tokens,
+        }
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
+
+        try:
+            result = http.post_json(
+                f"{self.base_url}/chat/completions", payload, headers=self.headers,
+                timeout=self.timeout, retries=2,
+            )
+        except http.HttpError as exc:
+            if exc.status == 400 and "max_completion_tokens" in exc.body:
+                payload.pop("max_completion_tokens")
+                payload["max_tokens"] = max_tokens
+                result = http.post_json(
+                    f"{self.base_url}/chat/completions", payload, headers=self.headers,
+                    timeout=self.timeout, retries=1,
+                )
+            else:
+                raise
+        return _text_from_chat(result)
+
+    def complete(self, prompt: str, *, max_tokens: int | None = None, json_mode: bool = True) -> str:
+        budget = max_tokens or self.max_tokens
+        if not self._use_chat_api:
+            try:
+                return self._responses(prompt, budget, json_mode=json_mode)
+            except http.HttpError as exc:
+                # 404/405 means this deployment has no Responses API — remember that.
+                if exc.status not in (404, 405):
+                    raise
+                self._use_chat_api = True
+        return self._chat(prompt, budget, json_mode=json_mode)
 
     def _json_call(self, prompt: str) -> Any:
         if not self.available:
@@ -169,9 +278,19 @@ class LLM:
 
     def check(self) -> tuple[bool, str]:
         if not self.api_key:
-            return False, "ANTHROPIC_API_KEY not set (optional — pipeline runs without it)"
+            return False, "OPENAI_API_KEY not set (optional — pipeline runs without it)"
         try:
-            text = self.complete('Reply with {"ok":true} and nothing else.', max_tokens=32)
+            text = self.complete('Reply with {"ok":true} and nothing else.', max_tokens=600)
+        except http.HttpError as exc:
+            if exc.status in (401, 403):
+                return False, "key rejected (HTTP 401/403)"
+            if exc.status == 404:
+                return False, f"model '{self.model}' not available to this key"
+            return False, str(exc)
         except Exception as exc:
             return False, f"{type(exc).__name__}: {exc}"
-        return ("ok" in text.lower()), f"ok — model {self.model} responded"
+        data = _extract_json(text)
+        transport = "chat completions" if self._use_chat_api else "responses"
+        if isinstance(data, dict) and data.get("ok"):
+            return True, f"ok — {self.model} responded via the {transport} API"
+        return bool(text.strip()), f"{self.model} responded ({transport} API): {text.strip()[:60]}"

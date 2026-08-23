@@ -146,12 +146,59 @@ def test_redacted_settings_never_expose_a_key(tmp_path, monkeypatch):
 
 
 def test_capability_report_explains_what_is_missing(tmp_path, monkeypatch):
-    for key in ("BFL_API_KEY", "PEXELS_API_KEY", "ANTHROPIC_API_KEY"):
+    for key in ("BFL_API_KEY", "PEXELS_API_KEY", "OPENAI_API_KEY"):
         monkeypatch.delenv(key, raising=False)
     report = Settings.from_env(tmp_path).capability_report()
 
     assert "BFL_API_KEY" in report["bfl"]
     assert report["duckduckgo"].startswith("ready")
+
+
+# --- creative assist (OpenAI) ------------------------------------------
+def test_llm_is_inert_without_a_key():
+    from archivist.llm import LLM
+
+    llm = LLM(api_key="", model="gpt-5.1")
+    assert not llm.available
+    ok, detail = llm.check()
+    assert not ok and "OPENAI_API_KEY" in detail
+
+    # Every refinement must return None rather than raising, so the pipeline
+    # silently keeps its deterministic output.
+    ladder = __import__("archivist.trends", fromlist=["derive_ladder"]).derive_ladder("test", seed=0)
+    assert llm.refine_ladder(ladder, topic="test") is None
+    assert llm.extra_queries(topic="test", ladder=ladder, existing=[]) == []
+
+
+def test_responses_payloads_are_parsed_including_reasoning_items():
+    from archivist.llm import _extract_json, _text_from_chat, _text_from_responses
+
+    reasoning_shaped = {
+        "output": [
+            {"type": "reasoning", "summary": []},
+            {"type": "message", "content": [{"type": "output_text", "text": '{"ok":true}'}]},
+        ]
+    }
+    assert _text_from_responses(reasoning_shaped) == '{"ok":true}'
+    assert _text_from_responses({"output_text": '{"ok":1}'}) == '{"ok":1}'
+    assert _text_from_chat({"choices": [{"message": {"content": "hello"}}]}) == "hello"
+
+    assert _extract_json('```json\n{"a": 1}\n```') == {"a": 1}
+    assert _extract_json('here you go {"a": 2} — done') == {"a": 2}
+    assert _extract_json("not json at all") is None
+
+
+def test_settings_carry_the_openai_configuration(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("OPENAI_MODEL", "gpt-5.1-mini")
+    monkeypatch.delenv("ARCHIVIST_OFFLINE", raising=False)
+    settings = Settings.from_env(tmp_path)
+
+    assert settings.can_use_llm
+    assert settings.openai_model == "gpt-5.1-mini"
+    assert settings.openai_base_url == "https://api.openai.com/v1"
+    assert settings.redacted()["openai_api_key"] == "set"
+    assert "sk-test" not in str(settings.redacted())
 
 
 # --- deployment --------------------------------------------------------

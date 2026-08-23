@@ -132,8 +132,13 @@ def run_checks(settings: Settings, *, include_generation: bool = True) -> list[C
         results.append(bfl)
     results.append(
         _timed(
-            "anthropic (creative assist)",
-            LLM(settings.anthropic_api_key, model=settings.anthropic_model).check,
+            "openai (creative assist)",
+            LLM(
+                settings.openai_api_key,
+                model=settings.openai_model,
+                base_url=settings.openai_base_url,
+                reasoning_effort=settings.openai_reasoning_effort,
+            ).check,
             required=False,
         )
     )

@@ -58,7 +58,7 @@ credits.
 | tab | what it is for |
 |---|---|
 | **① Setup** | paste keys, choose collection / garment / print size; writes `.env` for you |
-| **② Connection** | probes Python, disk, DuckDuckGo, Pexels, BFL and the creative assist, with plain-language failures |
+| **② Connection** | probes Python, disk, DuckDuckGo, Pexels, BFL and the OpenAI creative assist, with plain-language failures |
 | **③ Studio** | run the pipeline with a live log, reference board, ranked directions, prompts, artwork and print package |
 | **④ Monitor** | every past run: report, assets, log, disk use; delete or reopen any of them |
 | **⑤ Auto-plan** | turn one theme into a scheduled collection; start/stop the scheduler, run jobs now, watch history |
@@ -141,6 +141,8 @@ Every setting is an environment variable or a field in the Setup tab — see
 |---|---|---|
 | `BFL_API_KEY` | — | required to generate artwork |
 | `BFL_MODEL` | `flux-kontext-max` | Kontext models accept the references as context images |
+| `OPENAI_API_KEY` | — | optional creative assist |
+| `OPENAI_MODEL` | `gpt-5.1` | model used for that assist |
 | `ARCHIVIST_COLLECTION` | `default` | collections share a style lock |
 | `ARCHIVIST_OFFLINE` | `0` | `1` = synthetic references, no network, no spend |
 | `ARCHIVIST_SEED` | `0` | non-zero makes a run reproducible |
@@ -175,6 +177,10 @@ network, no keys, no credits.
 
 Python 3.10+ (3.14 targeted on Windows), `gradio`, `Pillow`, `requests`. Optional:
 `ddgs` (tracks DuckDuckGo endpoint changes), `python-dotenv`.
+
+External services: **BFL** for generation, **Pexels** for photography (optional),
+**OpenAI GPT-5.1** for the creative assist (optional). The assist is called through
+the Responses API, falling back to Chat Completions for OpenAI-compatible gateways.
 
 ## Using it responsibly
 

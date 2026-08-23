@@ -14,7 +14,7 @@ from pathlib import Path
 DEFAULT_ENV_FILES = (".env", ".env.local")
 
 # Keys that must never be echoed into a manifest, a log line or a notebook cell.
-SECRET_KEYS = ("BFL_API_KEY", "PEXELS_API_KEY", "ANTHROPIC_API_KEY")
+SECRET_KEYS = ("BFL_API_KEY", "PEXELS_API_KEY", "OPENAI_API_KEY")
 
 
 def _parse_env_file(path: Path) -> dict[str, str]:
@@ -89,13 +89,15 @@ class Settings:
     # --- credentials -----------------------------------------------------
     bfl_api_key: str = ""
     pexels_api_key: str = ""
-    anthropic_api_key: str = ""
+    openai_api_key: str = ""
 
     # --- endpoints / models ---------------------------------------------
     bfl_base_url: str = "https://api.bfl.ai"
     bfl_model: str = "flux-kontext-max"
     bfl_fallback_model: str = "flux-pro-1.1-ultra"
-    anthropic_model: str = "claude-opus-5"
+    openai_base_url: str = "https://api.openai.com/v1"
+    openai_model: str = "gpt-5.1"
+    openai_reasoning_effort: str = "low"
 
     # --- mining ----------------------------------------------------------
     max_queries: int = 24
@@ -135,11 +137,13 @@ class Settings:
         settings = cls(
             bfl_api_key=os.environ.get("BFL_API_KEY", "").strip(),
             pexels_api_key=os.environ.get("PEXELS_API_KEY", "").strip(),
-            anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", "").strip(),
+            openai_api_key=os.environ.get("OPENAI_API_KEY", "").strip(),
             bfl_base_url=os.environ.get("BFL_BASE_URL", "https://api.bfl.ai").rstrip("/"),
             bfl_model=os.environ.get("BFL_MODEL", "flux-kontext-max").strip(),
             bfl_fallback_model=os.environ.get("BFL_FALLBACK_MODEL", "flux-pro-1.1-ultra").strip(),
-            anthropic_model=os.environ.get("ANTHROPIC_MODEL", "claude-opus-5").strip(),
+            openai_base_url=os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/"),
+            openai_model=os.environ.get("OPENAI_MODEL", "gpt-5.1").strip(),
+            openai_reasoning_effort=os.environ.get("OPENAI_REASONING_EFFORT", "low").strip(),
             max_queries=_int("ARCHIVIST_MAX_QUERIES", 24),
             candidates_per_query=_int("ARCHIVIST_CANDIDATES_PER_QUERY", 6),
             max_candidates=_int("ARCHIVIST_MAX_CANDIDATES", 60),
@@ -180,7 +184,7 @@ class Settings:
 
     @property
     def can_use_llm(self) -> bool:
-        return bool(self.anthropic_api_key) and not self.offline
+        return bool(self.openai_api_key) and not self.offline
 
     def capability_report(self) -> dict[str, str]:
         def state(ok: bool, key: str) -> str:
@@ -192,13 +196,13 @@ class Settings:
             "duckduckgo": "offline mode" if self.offline else "ready (no key required)",
             "pexels": state(bool(self.pexels_api_key), "PEXELS_API_KEY"),
             "bfl": state(bool(self.bfl_api_key), "BFL_API_KEY"),
-            "llm_assist": state(bool(self.anthropic_api_key), "ANTHROPIC_API_KEY"),
+            "llm_assist": state(bool(self.openai_api_key), "OPENAI_API_KEY"),
         }
 
     def redacted(self) -> dict[str, object]:
         out: dict[str, object] = {}
         for key, value in vars(self).items():
-            if key in {"bfl_api_key", "pexels_api_key", "anthropic_api_key"}:
+            if key in {"bfl_api_key", "pexels_api_key", "openai_api_key"}:
                 out[key] = "set" if value else "unset"
             elif isinstance(value, Path):
                 out[key] = str(value)

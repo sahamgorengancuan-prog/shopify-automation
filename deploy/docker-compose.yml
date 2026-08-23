@@ -10,7 +10,7 @@ services:
       # Keys come from the host environment or a .env file next to this compose file.
       BFL_API_KEY: ${BFL_API_KEY:-}
       PEXELS_API_KEY: ${PEXELS_API_KEY:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ARCHIVIST_RUNS_DIR: /app/runs
       ARCHIVIST_COLLECTION: ${ARCHIVIST_COLLECTION:-default}
     volumes:

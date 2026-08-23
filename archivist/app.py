@@ -35,7 +35,7 @@ from .scheduler import CADENCES, WEEKDAYS, Scheduler, plan_preview, plan_topics
 GARMENTS = ["dark", "faded-black", "black", "light", "white", "sand"]
 ASPECTS = ["3:4", "1:1", "2:3", "4:3", "9:16", "16:9"]
 BFL_MODELS = ["flux-kontext-max", "flux-kontext-pro", "flux-pro-1.1-ultra", "flux-pro-1.1", "flux-dev"]
-ANTHROPIC_MODELS = ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5-20251001"]
+OPENAI_MODELS = ["gpt-5.1", "gpt-5.1-mini", "gpt-5", "gpt-5-mini", "gpt-4.1", "gpt-4.1-mini"]
 
 CSS = """
 :root { --arc-line:#2a2a2e; --arc-dim:#8b877e; --arc-ink:#e9e6df; --arc-accent:#c8b98a; }
@@ -225,9 +225,9 @@ def summary_markdown(result: RunResult | None) -> str:
 def save_setup(
     bfl_key: str,
     pexels_key: str,
-    anthropic_key: str,
+    openai_key: str,
     bfl_model: str,
-    anthropic_model: str,
+    openai_model: str,
     collection: str,
     garment: str,
     aspect: str,
@@ -239,9 +239,9 @@ def save_setup(
     values = {
         "BFL_API_KEY": bfl_key.strip(),
         "PEXELS_API_KEY": pexels_key.strip(),
-        "ANTHROPIC_API_KEY": anthropic_key.strip(),
+        "OPENAI_API_KEY": openai_key.strip(),
         "BFL_MODEL": bfl_model,
-        "ANTHROPIC_MODEL": anthropic_model,
+        "OPENAI_MODEL": openai_model,
         "ARCHIVIST_COLLECTION": collection.strip() or "default",
         "ARCHIVIST_GARMENT": garment,
         "ARCHIVIST_ASPECT_RATIO": aspect,
@@ -277,14 +277,14 @@ def setup_tab() -> None:
                     label="PEXELS_API_KEY", type="password", placeholder="optional",
                     info="adds contemporary photography and cinematic light to the reference pool",
                 )
-                anthropic_key = gr.Textbox(
-                    label="ANTHROPIC_API_KEY", type="password", placeholder="optional",
-                    info="refines the niche ladder, queries, Visual DNA and art direction",
+                openai_key = gr.Textbox(
+                    label="OPENAI_API_KEY", type="password", placeholder="optional",
+                    info="GPT-5.1 refines the niche ladder, queries, Visual DNA and art direction",
                 )
             with gr.Row():
                 bfl_model = gr.Dropdown(BFL_MODELS, value=STATE.settings.bfl_model, label="BFL model")
-                anthropic_model = gr.Dropdown(
-                    ANTHROPIC_MODELS, value=STATE.settings.anthropic_model, label="Creative assist model"
+                openai_model = gr.Dropdown(
+                    OPENAI_MODELS, value=STATE.settings.openai_model, label="Creative assist model"
                 )
             with gr.Row():
                 collection = gr.Textbox(
@@ -311,8 +311,8 @@ def setup_tab() -> None:
                     "- **BFL** — https://api.bfl.ai, dashboard → API keys. Charged per generation.\n"
                     "- **Pexels** — https://www.pexels.com/api/, free key, attribution is carried "
                     "through onto the reference board automatically.\n"
-                    "- **Anthropic** — https://console.anthropic.com. Optional; every stage has a "
-                    "deterministic fallback.\n\n"
+                    "- **OpenAI** — https://platform.openai.com/api-keys. Optional; GPT-5.1 sharpens "
+                    "the wording, and every stage it touches has a deterministic fallback.\n\n"
                     "Keys are written to `.env` in the project folder and loaded on start. "
                     "They never enter a run manifest, a prompt file or a log line.",
                     elem_classes="arc-note",
@@ -331,7 +331,7 @@ def setup_tab() -> None:
 
     save_button.click(
         save_setup,
-        inputs=[bfl_key, pexels_key, anthropic_key, bfl_model, anthropic_model, collection,
+        inputs=[bfl_key, pexels_key, openai_key, bfl_model, openai_model, collection,
                 garment, aspect, width_in, dpi, runs_dir, offline],
         outputs=[saved_note, capability],
     )
@@ -373,7 +373,8 @@ def connection_tab() -> None:
             "- **bfl 401/403** — key rejected. Check for a trailing space when pasting.\n"
             "- **storage low disk** — a run writes 20–60 reference images plus print files; keep a "
             "few hundred MB free.\n"
-            "- **anthropic fail** — optional. Every stage it touches has a deterministic fallback.",
+            "- **openai fail** — optional. A 404 usually means the key has no access to the chosen "
+            "model; pick another in Setup. Every stage it touches has a deterministic fallback.",
             elem_classes="arc-note",
         )
     test_button.click(run_connection_checks, inputs=include_generation, outputs=[summary, table])

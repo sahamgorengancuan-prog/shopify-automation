@@ -52,7 +52,7 @@ COMPOSE = """services:
       # Keys come from the host environment or a .env file next to this compose file.
       BFL_API_KEY: ${{BFL_API_KEY:-}}
       PEXELS_API_KEY: ${{PEXELS_API_KEY:-}}
-      ANTHROPIC_API_KEY: ${{ANTHROPIC_API_KEY:-}}
+      OPENAI_API_KEY: ${{OPENAI_API_KEY:-}}
       ARCHIVIST_RUNS_DIR: /app/runs
       ARCHIVIST_COLLECTION: ${{ARCHIVIST_COLLECTION:-default}}
     volumes:
@@ -132,7 +132,7 @@ pinned: false
 
 Trend research → reference mining → BFL Context → apparel graphics.
 
-Set `BFL_API_KEY` (and optionally `PEXELS_API_KEY`, `ANTHROPIC_API_KEY`) as Space
+Set `BFL_API_KEY` (and optionally `PEXELS_API_KEY`, `OPENAI_API_KEY`) as Space
 secrets. Without them the Space still runs in offline mode with synthetic
 references, which is enough to see the whole pipeline work.
 
