@@ -109,6 +109,7 @@ def load_run(path: Path | str) -> RunResult:
         concepts=[_concept(c) for c in data.get("concepts", [])],
         recommended=data.get("recommended", ""),
         warnings=list(data.get("warnings", [])),
+        discovery=data.get("discovery", {}) or {},
     )
 
 
@@ -143,6 +144,7 @@ def list_runs(runs_dir: Path | str, *, limit: int = 50) -> list[dict[str, Any]]:
                 "recommended": data.get("recommended", ""),
                 "warnings": len(data.get("warnings", [])),
                 "status": "failed" if any("run failed" in w for w in data.get("warnings", [])) else "ok",
+                "discovered": bool(data.get("discovery")),
                 "run_dir": str(manifest.parent),
             }
         )

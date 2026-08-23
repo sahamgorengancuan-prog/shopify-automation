@@ -4,10 +4,11 @@ Six tabs, one job each:
 
   ① SETUP       keys, defaults, and a .env written for you
   ② CONNECTION  one button that proves every dependency before you spend credits
-  ③ STUDIO      run the pipeline with a live log, galleries and print packages
-  ④ MONITOR     every past run, its report, its assets, its log
-  ⑤ AUTO-PLAN   turn one theme into a scheduled collection and let it run
-  ⑥ DEPLOY      Docker / systemd / Windows Task / HF Space, written out filled in
+  ③ DISCOVERY   the bot finds its own topics, and can design them unattended
+  ④ STUDIO      run the pipeline with a live log, galleries and print packages
+  ⑤ MONITOR     every past run, its report, its assets, its log
+  ⑥ SCHEDULE    autopilot on a cadence, or a planned collection of topics
+  ⑦ DEPLOY      Docker / systemd / Windows Task / HF Space, written out filled in
 
 Run it with ``python -m archivist.app`` (or the .bat / .sh launchers).
 """
@@ -55,7 +56,7 @@ footer { display:none !important; }
 
 HEADER = """<div id="arc-head">
 <h1>Archivist</h1>
-<p>trend research → reference mining → BFL context → apparel graphics</p>
+<p>auto trend discovery → reference mining → BFL context → apparel graphics</p>
 </div>"""
 
 
@@ -75,6 +76,9 @@ class AppState:
         self.running = threading.Event()
         self.last_result: RunResult | None = None
         self.selected_run: str = ""
+        self.discovery_log: deque[str] = deque(maxlen=500)
+        self.last_discovery: Any = None
+        self.staged_topic: str = ""
 
     def _on_event(self, message: str) -> None:
         self.sched_log.append(f"{datetime.now().strftime('%H:%M:%S')}  {message}")
@@ -226,6 +230,11 @@ def save_setup(
     bfl_key: str,
     pexels_key: str,
     openai_key: str,
+    reddit_id: str,
+    reddit_secret: str,
+    x_token: str,
+    meta_token: str,
+    meta_user: str,
     bfl_model: str,
     openai_model: str,
     collection: str,
@@ -234,12 +243,19 @@ def save_setup(
     width_in: float,
     dpi: int,
     runs_dir: str,
+    trends_geo: str,
     offline: bool,
 ) -> tuple[str, str]:
     values = {
         "BFL_API_KEY": bfl_key.strip(),
         "PEXELS_API_KEY": pexels_key.strip(),
         "OPENAI_API_KEY": openai_key.strip(),
+        "REDDIT_CLIENT_ID": reddit_id.strip(),
+        "REDDIT_CLIENT_SECRET": reddit_secret.strip(),
+        "X_BEARER_TOKEN": x_token.strip(),
+        "META_ACCESS_TOKEN": meta_token.strip(),
+        "META_IG_USER_ID": meta_user.strip(),
+        "ARCHIVIST_TRENDS_GEO": trends_geo.strip() or "US",
         "BFL_MODEL": bfl_model,
         "OPENAI_MODEL": openai_model,
         "ARCHIVIST_COLLECTION": collection.strip() or "default",
@@ -279,8 +295,26 @@ def setup_tab() -> None:
                 )
                 openai_key = gr.Textbox(
                     label="OPENAI_API_KEY", type="password", placeholder="optional",
-                    info="GPT-5.1 refines the niche ladder, queries, Visual DNA and art direction",
+                    info="GPT-5.1 judges discovered topics and refines the art direction",
                 )
+            with gr.Accordion("Discovery credentials (all optional)", open=False):
+                gr.Markdown(
+                    "Google Trends and DuckDuckGo need no key. These only widen the social "
+                    "signal — with none of them, Reddit answers anonymously and decides alone.",
+                    elem_classes="arc-note",
+                )
+                with gr.Row():
+                    reddit_id = gr.Textbox(label="REDDIT_CLIENT_ID", type="password",
+                                           placeholder="if anonymous Reddit is blocked from your IP")
+                    reddit_secret = gr.Textbox(label="REDDIT_CLIENT_SECRET", type="password")
+                x_token = gr.Textbox(label="X_BEARER_TOKEN", type="password",
+                                     placeholder="X API v2 — paid tier")
+                with gr.Row():
+                    meta_token = gr.Textbox(label="META_ACCESS_TOKEN", type="password",
+                                            placeholder="Instagram Graph — business account")
+                    meta_user = gr.Textbox(label="META_IG_USER_ID", placeholder="Instagram business user id")
+                trends_geo = gr.Textbox(value=STATE.settings.trends_geo, label="Google Trends geo",
+                                        info="US, GB, ID, DE… blank searches worldwide")
             with gr.Row():
                 bfl_model = gr.Dropdown(BFL_MODELS, value=STATE.settings.bfl_model, label="BFL model")
                 openai_model = gr.Dropdown(
@@ -331,8 +365,9 @@ def setup_tab() -> None:
 
     save_button.click(
         save_setup,
-        inputs=[bfl_key, pexels_key, openai_key, bfl_model, openai_model, collection,
-                garment, aspect, width_in, dpi, runs_dir, offline],
+        inputs=[bfl_key, pexels_key, openai_key, reddit_id, reddit_secret, x_token, meta_token,
+                meta_user, bfl_model, openai_model, collection, garment, aspect, width_in, dpi,
+                runs_dir, trends_geo, offline],
         outputs=[saved_note, capability],
     )
     refresh_capability.click(lambda: capability_markdown(STATE.refresh_settings()), outputs=capability)
@@ -381,7 +416,302 @@ def connection_tab() -> None:
 
 
 # --------------------------------------------------------------------------
-# ③ studio
+# ③ discovery / autopilot
+# --------------------------------------------------------------------------
+DISCOVERY_HEADERS = ["#", "topic", "score", "growth 3m", "social", "eng/post", "competition",
+                     "durability", "sources", "family"]
+
+
+def _discovery_engine(settings: Settings, use_llm: bool):
+    from .discovery import DiscoveryConfig, DiscoveryEngine
+    from .discovery.scoring import Thresholds
+    from .llm import LLM
+
+    llm = LLM(
+        settings.openai_api_key, model=settings.openai_model,
+        base_url=settings.openai_base_url, reasoning_effort=settings.openai_reasoning_effort,
+        enabled=use_llm and settings.can_use_llm,
+    )
+    config = DiscoveryConfig(
+        geo=settings.trends_geo,
+        timeframe=settings.trends_timeframe,
+        max_candidates=settings.discovery_candidates,
+        keep=settings.discovery_keep,
+        thresholds=Thresholds(
+            min_growth=settings.discovery_min_growth,
+            max_competition=settings.discovery_max_competition,
+            min_social=settings.discovery_min_social,
+        ),
+        use_llm=use_llm,
+    )
+    return DiscoveryEngine(settings, config=config, llm=llm, log=STATE.discovery_log.append)
+
+
+def _discovery_detail(report) -> str:
+    if not report or not report.opportunities:
+        return "_nothing cleared the filters_"
+    lines = ["### Why these topics", ""]
+    for opportunity in report.opportunities:
+        lines += [
+            f"**{opportunity.topic}** — score {opportunity.overall} "
+            f"({opportunity.durability or 'durability unrated'})",
+            "",
+            *[f"- `{signal.source}` {signal.metric}: {signal.detail}"
+              for signal in opportunity.signals if signal.ok],
+        ]
+        if opportunity.angle:
+            lines.append(f"- **angle:** {opportunity.angle}")
+        if opportunity.correlated_with:
+            lines.append(f"- **moves with:** {', '.join(opportunity.correlated_with)}")
+        if opportunity.risk:
+            lines.append(f"- **risk:** {opportunity.risk}")
+        lines.append("")
+    if report.rejected:
+        lines += ["### Filtered out", ""]
+        lines += [f"- {item.topic} — {item.rejected_reason}" for item in report.rejected[:15]]
+    lines += ["", f"_sources: {report.source_status}_"]
+    return "\n".join(lines)
+
+
+def discovery_run(count: int, geo: str, timeframe: str, min_growth: float, max_competition: float,
+                  min_social: float, candidates: int, offline: bool, use_llm: bool):
+    """Streaming: harvest → measure → screen → score → correlate → judge."""
+    STATE.discovery_log.clear()
+    settings = STATE.refresh_settings(
+        offline=bool(offline), trends_geo=geo.strip() or "US",
+        trends_timeframe=timeframe.strip() or "today 3-m",
+        discovery_min_growth=float(min_growth), discovery_max_competition=float(max_competition),
+        discovery_min_social=float(min_social), discovery_candidates=int(candidates),
+        discovery_keep=int(count),
+    )
+    engine = _discovery_engine(settings, use_llm)
+
+    events: queue.Queue = queue.Queue()
+    box: dict[str, Any] = {}
+    state = {"fraction": 0.0, "message": "starting"}
+
+    def worker() -> None:
+        try:
+            box["report"] = engine.discover(
+                count=int(count),
+                progress=lambda fraction, message: (
+                    state.__setitem__("fraction", fraction), state.__setitem__("message", message)
+                ),
+                cancel=STATE.cancel.is_set,
+            )
+        except Exception as exc:
+            box["error"] = exc
+        finally:
+            events.put(None)
+
+    STATE.cancel.clear()
+    thread = threading.Thread(target=worker, name="archivist-discovery", daemon=True)
+    thread.start()
+
+    while thread.is_alive():
+        try:
+            events.get(timeout=0.4)
+            break
+        except queue.Empty:
+            pass
+        yield (
+            f"`{_bar(state['fraction'])}` **{state['fraction'] * 100:4.0f}%** — {state['message']}",
+            "\n".join(list(STATE.discovery_log)[-300:]),
+            gr.update(), gr.update(), gr.update(),
+        )
+    thread.join(timeout=1.0)
+
+    if "error" in box:
+        yield (f"❌ discovery failed — {type(box['error']).__name__}: {box['error']}",
+               "\n".join(list(STATE.discovery_log)[-300:]), gr.update(), gr.update(), gr.update())
+        return
+
+    report = box.get("report")
+    STATE.last_discovery = report
+    engine.write_report(report)
+    topics = [opportunity.topic for opportunity in report.opportunities]
+    status = (
+        f"✅ {len(topics)} opportunities from {report.measured} measured "
+        f"({len(report.rejected)} filtered out) in {report.duration_s:.0f}s"
+        if topics else
+        "⚠️ nothing cleared the filters — loosen the thresholds below, or widen the geo"
+    )
+    yield (
+        status,
+        "\n".join(list(STATE.discovery_log)[-300:]),
+        report.table_rows(),
+        _discovery_detail(report),
+        gr.update(choices=topics, value=topics[0] if topics else None),
+    )
+
+
+def autopilot_run(designs: int, garment: str, aggressiveness: int, generate: bool,
+                  collection: str, offline: bool, use_llm: bool):
+    """The whole bot: discover, then design, with no topic typed anywhere."""
+    from .pipeline import autopilot as run_autopilot
+
+    STATE.discovery_log.clear()
+    settings = STATE.refresh_settings(
+        offline=bool(offline), collection=collection.strip() or "default", garment=garment,
+    )
+    options = PipelineOptions(
+        garment=garment, aggressiveness=int(aggressiveness), generate=bool(generate),
+        use_llm=bool(use_llm),
+    )
+
+    events: queue.Queue = queue.Queue()
+    box: dict[str, Any] = {}
+    state = {"fraction": 0.0, "message": "starting"}
+    STATE.cancel.clear()
+
+    def worker() -> None:
+        try:
+            box["result"] = run_autopilot(
+                settings, options, designs=int(designs),
+                progress=lambda fraction, message: (
+                    state.__setitem__("fraction", fraction), state.__setitem__("message", message)
+                ),
+                log=STATE.discovery_log.append,
+                cancel=STATE.cancel.is_set,
+            )
+        except Exception as exc:
+            box["error"] = exc
+        finally:
+            events.put(None)
+
+    thread = threading.Thread(target=worker, name="archivist-autopilot", daemon=True)
+    thread.start()
+    while thread.is_alive():
+        try:
+            events.get(timeout=0.5)
+            break
+        except queue.Empty:
+            pass
+        yield (
+            f"`{_bar(state['fraction'])}` **{state['fraction'] * 100:4.0f}%** — {state['message']}",
+            "\n".join(list(STATE.discovery_log)[-300:]),
+            gr.update(), gr.update(), gr.update(),
+        )
+    thread.join(timeout=1.0)
+
+    if "error" in box:
+        yield (f"❌ autopilot failed — {type(box['error']).__name__}: {box['error']}",
+               "\n".join(list(STATE.discovery_log)[-300:]), gr.update(), gr.update(), gr.update())
+        return
+
+    result = box["result"]
+    STATE.last_discovery = result.report
+    if result.runs:
+        STATE.last_result = result.runs[-1]
+    designed = ", ".join(result.topics) or "nothing"
+    status = f"✅ autopilot designed: **{designed}**" if result.runs else (
+        "⚠️ " + (result.warnings[0] if result.warnings else "nothing was designed")
+    )
+    gallery = storage.gallery_paths(result.runs[-1], kind="all") if result.runs else []
+    yield (
+        status,
+        "\n".join(list(STATE.discovery_log)[-300:]),
+        result.report.table_rows() if result.report else [],
+        _discovery_detail(result.report),
+        gallery,
+    )
+
+
+def discovery_tab() -> None:
+    gr.Markdown(
+        "### ③ Discovery & autopilot\n"
+        "Nobody types a topic. The bot reads Google Trends for three-month growth, Reddit / X / Meta "
+        "for whether anyone cares, and DuckDuckGo for how crowded the apparel market already is — "
+        "then screens out anything it must not print, scores what is left, and works out which "
+        "survivors are the same wave."
+    )
+    with gr.Row():
+        with gr.Column(scale=2):
+            with gr.Row():
+                count = gr.Slider(2, 12, value=STATE.settings.discovery_keep, step=1, label="Opportunities to keep")
+                candidates = gr.Slider(6, 40, value=STATE.settings.discovery_candidates, step=1,
+                                       label="Candidates to measure")
+            with gr.Row():
+                geo = gr.Textbox(value=STATE.settings.trends_geo, label="Google Trends geo",
+                                 info="US, GB, ID, DE… blank = worldwide")
+                timeframe = gr.Dropdown(
+                    ["today 3-m", "today 12-m", "today 1-m", "now 7-d"],
+                    value=STATE.settings.trends_timeframe, label="Window",
+                )
+            gr.Markdown("**Filters** — a topic must clear all three", elem_classes="arc-note")
+            min_growth = gr.Slider(0, 200, value=STATE.settings.discovery_min_growth, step=5,
+                                   label="Minimum growth over the window (%)")
+            max_competition = gr.Slider(10, 100, value=STATE.settings.discovery_max_competition, step=5,
+                                        label="Maximum competition (0 = empty market)")
+            min_social = gr.Slider(0, 60, value=STATE.settings.discovery_min_social, step=2,
+                                   label="Minimum social heat")
+            with gr.Row():
+                offline = gr.Checkbox(value=STATE.settings.offline, label="Offline mode")
+                use_llm = gr.Checkbox(value=True, label="Use GPT for topic judgement")
+            with gr.Row():
+                discover_button = gr.Button("Find opportunities", variant="primary", scale=2)
+                cancel_button = gr.Button("Cancel", variant="stop", scale=1)
+        with gr.Column(scale=1):
+            gr.Markdown("**Autopilot** — discover *and* design, hands off", elem_classes="arc-note")
+            designs = gr.Slider(1, 5, value=STATE.settings.autopilot_designs, step=1, label="Designs per cycle")
+            auto_collection = gr.Textbox(value=STATE.settings.collection, label="Collection")
+            auto_garment = gr.Dropdown(GARMENTS, value=STATE.settings.garment, label="Garment")
+            auto_aggr = gr.Slider(0, 10, value=5, step=1, label="Aggressiveness")
+            auto_generate = gr.Checkbox(value=True, label="Generate artwork (spends BFL credits)")
+            autopilot_button = gr.Button("Run autopilot now", variant="primary")
+            gr.Markdown(
+                "Autopilot writes the discovery evidence into every run manifest, so each design can "
+                "answer *why this subject* long after the trend has moved on.",
+                elem_classes="arc-note",
+            )
+
+    status = gr.Markdown("_idle_", elem_classes="arc-status")
+    table = gr.Dataframe(
+        headers=DISCOVERY_HEADERS,
+        datatype=["number", "str", "number", "str", "number", "number", "number", "str", "str", "str"],
+        interactive=False, wrap=True, label="Opportunities",
+    )
+    with gr.Row():
+        chosen = gr.Dropdown([], label="Send a topic to the Studio", scale=3)
+        send_button = gr.Button("Use this topic", scale=1)
+    send_note = gr.Markdown("", elem_classes="arc-note")
+    with gr.Tabs():
+        with gr.Tab("Evidence"):
+            detail = gr.Markdown("_run discovery to see the evidence behind each topic_")
+        with gr.Tab("Log"):
+            log = gr.Textbox(label="Discovery log", lines=18, interactive=False, autoscroll=True)
+        with gr.Tab("Autopilot output"):
+            auto_gallery = gr.Gallery(label="What autopilot produced", columns=4, height=420,
+                                      object_fit="contain")
+
+    discover_event = discover_button.click(
+        discovery_run,
+        inputs=[count, geo, timeframe, min_growth, max_competition, min_social, candidates,
+                offline, use_llm],
+        outputs=[status, log, table, detail, chosen],
+    )
+    autopilot_event = autopilot_button.click(
+        autopilot_run,
+        inputs=[designs, auto_garment, auto_aggr, auto_generate, auto_collection, offline, use_llm],
+        outputs=[status, log, table, detail, auto_gallery],
+    )
+    cancel_button.click(
+        lambda: (STATE.cancel.set(), "⏹ cancelling after the current step…")[1],
+        outputs=status, cancels=[discover_event, autopilot_event],
+    )
+    send_button.click(_stage_topic, inputs=chosen, outputs=send_note)
+
+
+def _stage_topic(topic: str) -> str:
+    """Hand a discovered topic to the Studio tab."""
+    STATE.staged_topic = (topic or "").strip()
+    if not STATE.staged_topic:
+        return "pick a topic first"
+    return f"📌 `{STATE.staged_topic}` staged — open ④ Studio and press **Load discovered topic**"
+
+
+# --------------------------------------------------------------------------
+# ④ studio
 # --------------------------------------------------------------------------
 def studio_run(
     topic: str,
@@ -541,6 +871,23 @@ def regenerate_variant(key: str, seed: int, garment: str) -> tuple[str, list, li
     )
 
 
+def _load_staged_topic() -> tuple[str, str]:
+    """Pull in whatever the Discovery tab staged, or the best topic on file."""
+    if STATE.staged_topic:
+        return STATE.staged_topic, f"loaded from discovery: **{STATE.staged_topic}**"
+    from .discovery import latest_report
+
+    report = latest_report(STATE.settings.runs_dir)
+    opportunities = (report or {}).get("opportunities", [])
+    if not opportunities:
+        return gr.update(), "no discovery run yet — open ③ Discovery and press **Find opportunities**"
+    best = opportunities[0]
+    return best["topic"], (
+        f"loaded the best topic on file: **{best['topic']}** "
+        f"(score {best.get('overall', '—')}, growth {best.get('growth_3m', 0):+.0f}%)"
+    )
+
+
 def studio_tab() -> None:
     gr.Markdown(
         "### ③ Studio\n"
@@ -551,9 +898,12 @@ def studio_tab() -> None:
         with gr.Column(scale=2):
             topic = gr.Textbox(
                 label="Topic / trend / cultural phenomenon",
-                placeholder="e.g. deep sea salvage, competitive pigeon racing, 1998 solar eclipse",
+                placeholder="leave it to the bot — or type one here to override discovery",
                 autofocus=True,
             )
+            with gr.Row():
+                load_discovered = gr.Button("Load discovered topic", size="sm")
+                discovered_note = gr.Markdown("", elem_classes="arc-note")
             audience = gr.Textbox(label="Target audience (optional)", placeholder="who wears this")
             with gr.Row():
                 collection = gr.Textbox(value=STATE.settings.collection, label="Collection")
@@ -628,6 +978,7 @@ def studio_tab() -> None:
     )
     cancel_button.click(lambda: (STATE.cancel.set(), "⏹ cancelling after the current step…")[1], outputs=status,
                         cancels=[run_event])
+    load_discovered.click(_load_staged_topic, outputs=[topic, discovered_note])
     variant_dd.change(show_prompt, inputs=variant_dd, outputs=[prompt_box, negative_box])
     regen_button.click(
         regenerate_variant,
@@ -758,16 +1109,18 @@ def build_plan(theme: str, count: int, seed: int, cadence: str, interval_minutes
 
 
 def create_job(
-    name: str, topics_text: str, cadence: str, interval_minutes: int, at_time: str, weekday: str,
-    collection: str, garment: str, aggressiveness: int, variants: list[str], generate: bool,
-    offline: bool, enabled: bool,
+    name: str, topics_text: str, mode: str, designs: int, cadence: str, interval_minutes: int,
+    at_time: str, weekday: str, collection: str, garment: str, aggressiveness: int,
+    variants: list[str], generate: bool, offline: bool, enabled: bool,
 ) -> tuple[str, list[list[Any]]]:
+    autonomous = mode.startswith("autopilot")
     topics = [line.strip() for line in topics_text.splitlines() if line.strip()]
-    if not topics:
-        return "⚠️ no topics — generate a plan or type one topic per line", STATE.scheduler.job_rows()
+    if not topics and not autonomous:
+        return "⚠️ no topics — generate a plan, type one per line, or switch to autopilot", STATE.scheduler.job_rows()
     job = STATE.scheduler.create_job(
-        name or f"{topics[0][:30]} plan",
+        name or ("autopilot" if autonomous else f"{topics[0][:30]} plan"),
         topics,
+        mode="autopilot" if autonomous else "topics",
         cadence=cadence,
         interval_minutes=int(interval_minutes),
         at_time=at_time,
@@ -780,10 +1133,12 @@ def create_job(
             "variants": list(variants) or ["A", "B", "C"],
             "generate": bool(generate),
             "offline": bool(offline),
+            "designs": int(designs),
         },
     )
+    scope = f"autopilot, {int(designs)} design(s) per firing" if job.autonomous else f"{len(job.topics)} topics"
     return (
-        f"✅ job `{job.id}` created — {job.describe()}, {len(job.topics)} topics, next {job.next_run or '—'}",
+        f"✅ job `{job.id}` created — {job.describe()}, {scope}, next {job.next_run or '—'}",
         STATE.scheduler.job_rows(),
     )
 
@@ -829,10 +1184,11 @@ def scheduler_refresh() -> tuple[str, list[list[Any]], list[list[Any]], str]:
 
 def schedule_tab() -> None:
     gr.Markdown(
-        "### ⑤ Auto-plan & schedule\n"
-        "Give it one theme and it writes a collection plan — distinct but related topics, spread "
-        "across a schedule. Every run in a collection inherits the same style lock, so the drop "
-        "reads as one body of work instead of ten unrelated shirts."
+        "### ⑥ Schedule\n"
+        "Two ways to run unattended. **Autopilot** rediscovers what is trending at every firing and "
+        "designs the winners — nothing is typed, ever. **Topics** works through a plan you generated "
+        "from one theme. Either way, every run in a collection inherits the same style lock, so a "
+        "drop reads as one body of work."
     )
     with gr.Row():
         with gr.Column(scale=2):
@@ -855,7 +1211,13 @@ def schedule_tab() -> None:
             )
         with gr.Column(scale=2):
             gr.Markdown("#### Job settings", elem_classes="arc-note")
-            job_name = gr.Textbox(label="Job name", placeholder="Autumn drop")
+            job_mode = gr.Radio(
+                ["autopilot — discover topics at run time", "topics — work through the list"],
+                value="autopilot — discover topics at run time", label="What should each firing do?",
+            )
+            job_designs = gr.Slider(1, 5, value=STATE.settings.autopilot_designs, step=1,
+                                    label="Designs per firing (autopilot)")
+            job_name = gr.Textbox(label="Job name", placeholder="Nightly autopilot")
             with gr.Row():
                 job_collection = gr.Textbox(value=STATE.settings.collection, label="Collection")
                 job_garment = gr.Dropdown(GARMENTS, value=STATE.settings.garment, label="Garment")
@@ -881,8 +1243,9 @@ def schedule_tab() -> None:
         live = gr.Checkbox(value=True, label="Live updates")
     sched_banner = gr.Markdown("⚪ stopped", elem_classes="arc-status")
     jobs_df = gr.Dataframe(
-        headers=["id", "name", "state", "cadence", "next run", "topic", "current topic", "last status"],
-        datatype=["str"] * 8, interactive=False, wrap=True, label="Jobs",
+        headers=["id", "name", "state", "mode", "cadence", "next run", "progress",
+                 "current topic", "last status"],
+        datatype=["str"] * 9, interactive=False, wrap=True, label="Jobs",
     )
     with gr.Row():
         job_id = gr.Textbox(label="Job id", scale=2)
@@ -906,8 +1269,9 @@ def schedule_tab() -> None:
     )
     create_button.click(
         create_job,
-        inputs=[job_name, topics_text, cadence, interval_minutes, at_time, weekday, job_collection,
-                job_garment, job_aggressiveness, job_variants, job_generate, job_offline, job_enabled],
+        inputs=[job_name, topics_text, job_mode, job_designs, cadence, interval_minutes, at_time,
+                weekday, job_collection, job_garment, job_aggressiveness, job_variants,
+                job_generate, job_offline, job_enabled],
         outputs=[create_note, jobs_df],
     )
     start_button.click(scheduler_start, outputs=[sched_banner, event_log])
@@ -1037,13 +1401,15 @@ def build_app() -> gr.Blocks:
                 setup_tab()
             with gr.Tab("② Connection"):
                 connection_tab()
-            with gr.Tab("③ Studio"):
+            with gr.Tab("③ Discovery"):
+                discovery_tab()
+            with gr.Tab("④ Studio"):
                 studio_tab()
-            with gr.Tab("④ Monitor"):
+            with gr.Tab("⑤ Monitor"):
                 monitor_tab()
-            with gr.Tab("⑤ Auto-plan"):
+            with gr.Tab("⑥ Schedule"):
                 schedule_tab()
-            with gr.Tab("⑥ Deploy"):
+            with gr.Tab("⑦ Deploy"):
                 deploy_tab()
         gr.Markdown(
             "References are ingredients, never targets — nothing mined is reproduced in the output. "

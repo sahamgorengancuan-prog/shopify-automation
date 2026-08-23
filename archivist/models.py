@@ -321,6 +321,8 @@ class RunResult:
     concepts: list[Concept] = field(default_factory=list)
     recommended: str = ""
     warnings: list[str] = field(default_factory=list)
+    # Why this topic was chosen, when the bot chose it itself.
+    discovery: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -338,6 +340,7 @@ class RunResult:
             "concepts": [c.to_dict() for c in self.concepts],
             "recommended": self.recommended,
             "warnings": self.warnings,
+            "discovery": self.discovery,
         }
 
     def concept(self, key: str) -> Concept | None:

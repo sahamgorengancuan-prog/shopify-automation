@@ -16,7 +16,7 @@ from pathlib import Path
 
 from . import connectivity, deploy as deploy_mod, storage
 from .config import Settings
-from .pipeline import PipelineOptions, run as run_pipeline
+from .pipeline import PipelineOptions, autopilot as run_autopilot, run as run_pipeline
 from .queries import cluster_summary, generate_queries
 from .scheduler import Scheduler, plan_preview, plan_topics
 from .trends import derive_ladder
@@ -58,6 +58,63 @@ def cmd_run(args: argparse.Namespace) -> int:
     for warning in result.warnings:
         print(f"warning    : {warning}")
     return 0
+
+
+def cmd_discover(args: argparse.Namespace) -> int:
+    """Find topics — no design work, just the research."""
+    from .discovery import DiscoveryEngine
+    from .llm import LLM
+
+    settings = _settings(args)
+    llm = LLM(settings.openai_api_key, model=settings.openai_model,
+              base_url=settings.openai_base_url, enabled=settings.can_use_llm and not args.no_llm)
+    engine = DiscoveryEngine(settings, llm=llm, log=lambda line: print(line, flush=True))
+    report = engine.discover(count=args.count)
+    path = engine.write_report(report)
+
+    print("\n" + "=" * 96)
+    header = f"{'score':>5}  {'topic':<38} {'growth':>8} {'social':>7} {'eng/post':>9} {'comp':>6}  sources"
+    print(header)
+    print("-" * 96)
+    for opportunity in report.opportunities:
+        print(f"{opportunity.overall:5.2f}  {opportunity.topic[:38]:<38} "
+              f"{opportunity.growth_3m:+7.0f}% {opportunity.social_heat:7.0f} "
+              f"{opportunity.avg_engagement:9.0f} {opportunity.competition:6.0f}  "
+              f"{','.join(opportunity.sources)}")
+        if opportunity.angle:
+            print(f"       angle: {opportunity.angle}")
+    if args.rejected:
+        print("\nrejected:")
+        for opportunity in report.rejected[:20]:
+            print(f"  {opportunity.topic[:44]:<44} {opportunity.rejected_reason}")
+    print(f"\nfamilies: {report.families}")
+    print(f"report: {path}")
+    return 0 if report.opportunities else 1
+
+
+def cmd_autopilot(args: argparse.Namespace) -> int:
+    """Discover topics and design them — the whole bot in one command."""
+    settings = _settings(args)
+    options = PipelineOptions(
+        garment=args.garment or settings.garment,
+        aggressiveness=args.aggressiveness,
+        generate=not args.no_generate,
+        build_mockup=not args.no_mockup,
+        use_llm=not args.no_llm,
+    )
+    result = run_autopilot(
+        settings, options, designs=args.designs, log=lambda line: print(line, flush=True)
+    )
+    print("\n" + "=" * 72)
+    if result.report is not None:
+        for opportunity in result.report.opportunities:
+            print(f"  candidate {opportunity.overall:5.2f}  {opportunity.summary()}")
+    for run_result in result.runs:
+        print(f"  designed: {run_result.topic} -> {run_result.run_dir} "
+              f"(recommended {run_result.recommended})")
+    for warning in result.warnings:
+        print(f"  warning: {warning}")
+    return 0 if result.runs else 1
 
 
 def cmd_app(args: argparse.Namespace) -> int:
@@ -196,6 +253,21 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--keep-references", type=int, default=None)
     run.add_argument("--max-queries", type=int, default=None)
     run.set_defaults(func=cmd_run)
+
+    discover = sub.add_parser("discover", help="find trending topics worth designing (no design work)")
+    discover.add_argument("-n", "--count", type=int, default=6)
+    discover.add_argument("--rejected", action="store_true", help="also list what was filtered out and why")
+    discover.add_argument("--no-llm", action="store_true")
+    discover.set_defaults(func=cmd_discover)
+
+    auto = sub.add_parser("autopilot", help="discover topics AND design them, with no input")
+    auto.add_argument("-n", "--designs", type=int, default=None, help="how many topics to design")
+    auto.add_argument("--garment", default=None)
+    auto.add_argument("--aggressiveness", type=int, default=5)
+    auto.add_argument("--no-generate", action="store_true")
+    auto.add_argument("--no-mockup", action="store_true")
+    auto.add_argument("--no-llm", action="store_true")
+    auto.set_defaults(func=cmd_autopilot)
 
     app = sub.add_parser("app", help="launch the Gradio control room")
     app.add_argument("--host", default="127.0.0.1")

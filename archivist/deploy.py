@@ -53,6 +53,11 @@ COMPOSE = """services:
       BFL_API_KEY: ${{BFL_API_KEY:-}}
       PEXELS_API_KEY: ${{PEXELS_API_KEY:-}}
       OPENAI_API_KEY: ${{OPENAI_API_KEY:-}}
+      REDDIT_CLIENT_ID: ${{REDDIT_CLIENT_ID:-}}
+      REDDIT_CLIENT_SECRET: ${{REDDIT_CLIENT_SECRET:-}}
+      X_BEARER_TOKEN: ${{X_BEARER_TOKEN:-}}
+      META_ACCESS_TOKEN: ${{META_ACCESS_TOKEN:-}}
+      META_IG_USER_ID: ${{META_IG_USER_ID:-}}
       ARCHIVIST_RUNS_DIR: /app/runs
       ARCHIVIST_COLLECTION: ${{ARCHIVIST_COLLECTION:-default}}
     volumes:
@@ -132,8 +137,8 @@ pinned: false
 
 Trend research → reference mining → BFL Context → apparel graphics.
 
-Set `BFL_API_KEY` (and optionally `PEXELS_API_KEY`, `OPENAI_API_KEY`) as Space
-secrets. Without them the Space still runs in offline mode with synthetic
+Set `BFL_API_KEY` (and optionally `PEXELS_API_KEY`, `OPENAI_API_KEY`, plus the
+Reddit/X/Meta discovery credentials) as Space secrets. Without them the Space still runs in offline mode with synthetic
 references, which is enough to see the whole pipeline work.
 
 Note: Space storage is ephemeral unless persistent storage is enabled — attach a

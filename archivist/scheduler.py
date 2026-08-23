@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .config import Settings
-from .pipeline import PipelineOptions, run as run_pipeline
+from .pipeline import PipelineOptions, autopilot as run_autopilot, run as run_pipeline
 from .trends import ERAS, GEOGRAPHIES, INSTITUTIONS, MEDIUMS, headline
 
 TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
@@ -62,6 +62,9 @@ class Job:
     id: str
     name: str
     topics: list[str]
+    # "topics"   — work through the list above, one per firing
+    # "autopilot" — discover the topics at fire time and design the winners
+    mode: str = "topics"
     cadence: str = "daily"            # interval | daily | weekly | once
     interval_minutes: int = 720
     at_time: str = "09:00"
@@ -79,10 +82,19 @@ class Job:
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
+    @property
+    def autonomous(self) -> bool:
+        return self.mode == "autopilot"
+
     def current_topic(self) -> str:
+        if self.autonomous:
+            return "(discovered at run time)"
         if not self.topics:
             return ""
         return self.topics[self.cursor % len(self.topics)]
+
+    def runnable(self) -> bool:
+        return self.autonomous or bool(self.topics)
 
     def compute_next(self, *, after: datetime | None = None) -> str:
         """Next fire time, always strictly in the future."""
@@ -174,6 +186,7 @@ class Scheduler:
         name: str,
         topics: list[str],
         *,
+        mode: str = "topics",
         cadence: str = "daily",
         interval_minutes: int = 720,
         at_time: str = "09:00",
@@ -186,6 +199,7 @@ class Scheduler:
             id=uuid.uuid4().hex[:8],
             name=name.strip() or "unnamed plan",
             topics=[t.strip() for t in topics if t.strip()],
+            mode="autopilot" if mode == "autopilot" else "topics",
             cadence=cadence if cadence in CADENCES else "daily",
             interval_minutes=max(1, int(interval_minutes)),
             at_time=at_time,
@@ -224,9 +238,10 @@ class Scheduler:
                 job.id,
                 job.name,
                 "▶ running" if self.current == job.id else ("on" if job.enabled else "paused"),
+                "autopilot" if job.autonomous else "topics",
                 job.describe(),
                 job.next_run or "—",
-                f"{job.cursor % max(1, len(job.topics)) + 1}/{len(job.topics)}",
+                "auto" if job.autonomous else f"{job.cursor % max(1, len(job.topics)) + 1}/{len(job.topics)}",
                 job.current_topic(),
                 job.last_status,
             ]
@@ -277,6 +292,7 @@ class Scheduler:
             topic = job.current_topic()
             self.current = job.id
         if not topic:
+            self.current = ""
             return {"status": "no topics configured"}
 
         started = _now()
@@ -292,10 +308,26 @@ class Scheduler:
         }
         self.on_event(f"▶ {job.name}: {topic}")
         try:
-            result = run_pipeline(topic, settings, options, log=lambda line: self.on_event(f"  {line}"))
-            entry["status"] = "failed" if any("run failed" in w for w in result.warnings) else "ok"
-            entry["run_dir"] = result.run_dir
-            entry["recommended"] = result.recommended
+            if job.autonomous:
+                # The bot picks its own subject at fire time, then designs it.
+                auto = run_autopilot(
+                    settings, options,
+                    designs=int(job.options.get("designs", settings.autopilot_designs)),
+                    log=lambda line: self.on_event(f"  {line}"),
+                )
+                entry["topic"] = ", ".join(auto.topics) or "(nothing cleared the filters)"
+                entry["run_dir"] = auto.runs[-1].run_dir if auto.runs else ""
+                entry["recommended"] = auto.runs[-1].recommended if auto.runs else ""
+                entry["discovered"] = [
+                    {"topic": o.topic, "score": o.overall, "growth_3m": o.growth_3m}
+                    for o in (auto.report.opportunities if auto.report else [])
+                ]
+                entry["status"] = "ok" if auto.runs else "no opportunity cleared the filters"
+            else:
+                result = run_pipeline(topic, settings, options, log=lambda line: self.on_event(f"  {line}"))
+                entry["status"] = "failed" if any("run failed" in w for w in result.warnings) else "ok"
+                entry["run_dir"] = result.run_dir
+                entry["recommended"] = result.recommended
         except Exception as exc:
             entry["status"] = f"error: {type(exc).__name__}: {exc}"
         finally:
@@ -320,7 +352,7 @@ class Scheduler:
         with self._lock:
             due = []
             for job in self.jobs.values():
-                if not job.enabled or not job.topics:
+                if not job.enabled or not job.runnable():
                     continue
                 scheduled = _parse(job.next_run)
                 if scheduled and scheduled <= moment:
@@ -364,7 +396,7 @@ class Scheduler:
 
     def status(self) -> dict[str, Any]:
         with self._lock:
-            enabled = [job for job in self.jobs.values() if job.enabled and job.topics]
+            enabled = [job for job in self.jobs.values() if job.enabled and job.runnable()]
             upcoming = sorted((job.next_run, job.name, job.current_topic()) for job in enabled if job.next_run)
         return {
             "running": self.running,

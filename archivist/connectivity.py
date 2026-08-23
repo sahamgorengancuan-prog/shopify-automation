@@ -16,6 +16,9 @@ from typing import Callable
 
 from .bfl import BFLClient
 from .config import Settings
+from .discovery.google_trends import GoogleTrends
+from .discovery.reddit import Reddit
+from .discovery.social import MetaSignals, XSignals
 from .llm import LLM
 from .sources.duckduckgo import DuckDuckGoImages
 from .sources.pexels import PexelsImages
@@ -98,8 +101,44 @@ def run_checks(settings: Settings, *, include_generation: bool = True) -> list[C
 
     if settings.offline:
         results.append(_timed("offline generator", SyntheticSource(seed=settings.seed).check))
+        results.append(CheckResult("discovery", True, "offline mode — synthetic trend/social signals", 0, False))
         results.append(CheckResult("network", True, "offline mode — no outbound calls will be made", 0, False))
         return results
+
+    # --- discovery sources ------------------------------------------------
+    results.append(
+        _timed(
+            "google trends (discovery)",
+            GoogleTrends(
+                geo=settings.trends_geo, timeframe=settings.trends_timeframe,
+                timeout=settings.http_timeout, user_agent=settings.user_agent,
+            ).check,
+        )
+    )
+    results.append(
+        _timed(
+            "reddit (social heat)",
+            Reddit(
+                client_id=settings.reddit_client_id,
+                client_secret=settings.reddit_client_secret,
+                user_agent=settings.reddit_user_agent,
+                timeout=settings.http_timeout,
+            ).check,
+            required=False,
+        )
+    )
+    results.append(
+        _timed("x (social heat)", XSignals(bearer_token=settings.x_bearer_token,
+                                           timeout=settings.http_timeout).check, required=False)
+    )
+    results.append(
+        _timed(
+            "meta (social heat)",
+            MetaSignals(access_token=settings.meta_access_token, ig_user_id=settings.meta_ig_user_id,
+                        timeout=settings.http_timeout).check,
+            required=False,
+        )
+    )
 
     results.append(
         _timed(

@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import time
 import traceback
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from . import board, brief, direction as direction_mod, gate, mining, prompts, queries as queries_mod
 from .apparel import prepare
@@ -48,6 +48,8 @@ class PipelineOptions:
     include_text: bool = True
     build_mockup: bool = True
     use_llm: bool = True
+    # Set by autopilot: the evidence behind an automatically chosen topic.
+    discovery: dict = field(default_factory=dict)
     context_roles: list[str] = field(
         default_factory=lambda: [Role.HERO.value, Role.TEXTURE.value, Role.COMPOSITION.value, Role.TYPOGRAPHY.value]
     )
@@ -147,6 +149,7 @@ def run(
         created_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         collection=settings.collection,
         settings=settings.redacted(),
+        discovery=dict(options.discovery),
     )
 
     try:
@@ -341,6 +344,124 @@ def run(
     finally:
         reporter.close()
 
+    return result
+
+
+@dataclass
+class AutopilotResult:
+    """One full autonomous cycle: what it found, and what it made of it."""
+
+    report: Any = None                      # discovery.models.DiscoveryReport
+    report_path: str = ""
+    runs: list[RunResult] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+    @property
+    def topics(self) -> list[str]:
+        return [run_result.topic for run_result in self.runs]
+
+
+def autopilot(
+    settings: Settings | None = None,
+    options: PipelineOptions | None = None,
+    *,
+    designs: int | None = None,
+    progress: Progress | None = None,
+    log: Log | None = None,
+    cancel: Cancel | None = None,
+) -> AutopilotResult:
+    """Find the topics *and* make the designs — nobody types anything.
+
+    Discovery decides what is worth printing this week; the design pipeline then
+    runs on each winner with the evidence attached to its manifest, so a run can
+    always answer "why this subject".
+    """
+    from .discovery import DiscoveryEngine  # local import keeps the base import light
+
+    settings = settings or Settings.from_env()
+    options = options or PipelineOptions()
+    designs = designs or settings.autopilot_designs
+    progress = progress or (lambda fraction, message: None)
+    log = log or (lambda message: None)
+    cancel = cancel or (lambda: False)
+
+    llm = LLM(
+        settings.openai_api_key,
+        model=settings.openai_model,
+        base_url=settings.openai_base_url,
+        reasoning_effort=settings.openai_reasoning_effort,
+        enabled=options.use_llm and settings.can_use_llm,
+    )
+    engine = DiscoveryEngine(settings, llm=llm, log=log)
+
+    # Discovery owns the first third of the progress bar; the designs share the rest.
+    result = AutopilotResult()
+    report = engine.discover(
+        count=max(designs, settings.discovery_keep),
+        progress=lambda fraction, message: progress(fraction * 0.33, f"discovery: {message}"),
+        cancel=cancel,
+    )
+    result.report = report
+    result.report_path = str(engine.write_report(report))
+    result.warnings.extend(report.warnings)
+
+    picks = report.opportunities[:designs]
+    if not picks:
+        result.warnings.append(
+            "discovery found nothing that cleared the filters — loosen the thresholds "
+            "(min growth / max competition / min social) or widen the anchors"
+        )
+        log("autopilot: no topic cleared the filters, nothing was designed")
+        progress(1.0, "no opportunities")
+        return result
+
+    for index, opportunity in enumerate(picks):
+        if cancel():
+            result.warnings.append("autopilot cancelled")
+            break
+        share = 0.67 / len(picks)
+        base = 0.33 + share * index
+        log(f"autopilot: designing '{opportunity.topic}' — {opportunity.summary()}")
+
+        run_options = replace(
+            options,
+            audience=opportunity.audience or options.audience,
+            discovery={
+                "chosen_by": "autopilot",
+                "score": opportunity.overall,
+                "scores": opportunity.scores.to_dict(),
+                "growth_3m": opportunity.growth_3m,
+                "momentum": opportunity.momentum,
+                "social_heat": opportunity.social_heat,
+                "avg_engagement": opportunity.avg_engagement,
+                "competition": opportunity.competition,
+                "sources": opportunity.sources,
+                "family": opportunity.family,
+                "correlated_with": opportunity.correlated_with,
+                "rising_queries": opportunity.rising_queries[:8],
+                "angle": opportunity.angle,
+                "durability": opportunity.durability,
+                "risk": opportunity.risk,
+                "signals": [signal.to_dict() for signal in opportunity.signals],
+                "report": result.report_path,
+            },
+        )
+        try:
+            run_result = run(
+                opportunity.topic,
+                settings,
+                run_options,
+                progress=lambda fraction, message: progress(base + share * fraction, message),
+                log=log,
+                cancel=cancel,
+            )
+            result.runs.append(run_result)
+        except Exception as exc:
+            message = f"design failed for '{opportunity.topic}': {type(exc).__name__}: {exc}"
+            result.warnings.append(message)
+            log(message)
+
+    progress(1.0, f"autopilot complete — {len(result.runs)} design run(s)")
     return result
 
 

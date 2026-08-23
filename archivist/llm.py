@@ -276,6 +276,70 @@ class LLM:
         except TypeError:
             return None
 
+    # -- discovery --------------------------------------------------------
+    def extract_topics(self, titles: list[str], *, limit: int = 12) -> list[str]:
+        """Turn a pile of Reddit headlines into candidate *topics*.
+
+        A headline is an event; a topic is the thing underneath it that could
+        still be interesting in six months.
+        """
+        data = self._json_call(
+            "These are hot Reddit post titles. Extract the underlying recurring topics — the "
+            "objects, practices, places or subcultures behind them, never the news event, the "
+            "person, or the brand. Skip anything about celebrities, politics, tragedy, sport "
+            "fixtures or trademarked properties.\n"
+            f"titles: {json.dumps(titles[:60], ensure_ascii=False)}\n"
+            f'Reply as {{"topics":[str,...]}} with at most {limit} short noun phrases.'
+        )
+        if not isinstance(data, dict):
+            return []
+        return [str(topic).strip() for topic in data.get("topics", [])[:limit] if str(topic).strip()]
+
+    def refine_seeds(self, terms: list[str]) -> dict[str, str]:
+        """Rewrite raw search strings into topics a designer can work with.
+
+        Returns ``{original: replacement}``; unchanged terms may be omitted.
+        """
+        data = self._json_call(
+            "These are raw trending search strings. Rewrite each one as a short, concrete topic "
+            "suitable for an apparel graphic: drop question words, filler and site names, keep "
+            "the subject. If a string cannot become a design subject, map it to an empty string.\n"
+            f"terms: {json.dumps(terms[:40], ensure_ascii=False)}\n"
+            'Reply as {"terms":{"<original>":"<rewritten or empty>"}}'
+        )
+        if not isinstance(data, dict):
+            return {}
+        mapping = data.get("terms", {})
+        if not isinstance(mapping, dict):
+            return {}
+        return {str(key): str(value).strip() for key, value in mapping.items() if str(value).strip()}
+
+    def judge_topics(self, candidates: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        """Score wearability and propose an angle for each measured candidate.
+
+        The model sees the measurements, so its judgement is about the *design*
+        question the numbers cannot answer: does this make a shirt somebody wants,
+        does it survive the season, and does printing it create a rights problem.
+        """
+        data = self._json_call(
+            "You are choosing subjects for an independent apparel label that publishes designs as "
+            "records from a fictional institution. For each candidate below decide whether it can "
+            "become a graphic people would wear.\n"
+            f"candidates: {json.dumps(candidates, ensure_ascii=False)}\n"
+            'Reply as {"verdicts":[{"topic":str,"apparel_fit":0-10,"angle":str,"audience":str,'
+            '"durability":"fad|seasonal|lasting","risk":str,"drop":bool,"reason":str}]}\n'
+            "Set drop=true for anything that needs someone else's trademark, a real person's "
+            "likeness, a live news event, or that has no visual world of its own. "
+            "angle is one sentence describing the design direction, not a slogan."
+        )
+        if not isinstance(data, dict):
+            return {}
+        verdicts: dict[str, dict[str, Any]] = {}
+        for row in data.get("verdicts", []):
+            if isinstance(row, dict) and row.get("topic"):
+                verdicts[str(row["topic"])] = row
+        return verdicts
+
     def check(self) -> tuple[bool, str]:
         if not self.api_key:
             return False, "OPENAI_API_KEY not set (optional — pipeline runs without it)"
