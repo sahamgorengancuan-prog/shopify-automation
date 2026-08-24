@@ -1,5 +1,6 @@
 """Command line interface — the same pipeline the Gradio app drives.
 
+    python -m archivist house                    the house system, end to end
     python -m archivist app                      launch the UI
     python -m archivist run "deep sea salvage"   one full run
     python -m archivist check                    connection self-test
@@ -115,6 +116,90 @@ def cmd_autopilot(args: argparse.Namespace) -> int:
     for warning in result.warnings:
         print(f"  warning: {warning}")
     return 0 if result.runs else 1
+
+
+def cmd_house(args: argparse.Namespace) -> int:
+    """The house system end to end: discovery → route → art → proof → delivery."""
+    from .house import HouseBlocked, RenderOptions, run_session
+
+    settings = _settings(args)
+    options = PipelineOptions(
+        garment=args.garment or settings.garment,
+        aggressiveness=args.aggressiveness,
+        use_llm=not args.no_llm,
+        build_mockup=not args.no_mockup,
+    )
+    render_options = RenderOptions(
+        budget=args.budget,
+        allow_controlled_edit=args.allow_edit,
+        allow_concept_retry=args.allow_concept_retry,
+        require_critic=not args.no_critic,
+        print_statement=not args.no_statement,
+        reuse_raw=args.reuse_raw,
+        seed=settings.seed,
+        build_mockup=not args.no_mockup,
+    )
+    if args.statement:
+        settings.house_statement_override = args.statement
+    if args.anchor:
+        settings.house_anchor = args.anchor
+
+    try:
+        result = run_session(
+            settings, options, topic=args.topic or "", render_options=render_options,
+            generate=not args.no_generate, reset_style_lock=not args.keep_style_lock,
+            log=lambda line: print(line, flush=True),
+        )
+    except HouseBlocked as blocked:
+        print(f"\nblocked before spending anything: {blocked}")
+        return 2
+
+    route = result.route
+    print("\n" + "=" * 72)
+    print(f"market signal   : {route['market_signal']}")
+    print(f"evidence        : {route['real_subject']} — {route['source_property']}")
+    print(f"mutation        : {route['mutation']} → {route['metaphor']}")
+    print(f"silhouette      : {(route.get('silhouette') or {}).get('label')}")
+    print(f"statement       : {route['statement']}")
+    print(f"paid generations: {result.delivery.paid_calls if result.delivery else 0}")
+    if result.approved:
+        print(f"approved        : {result.delivery.final_dir}")
+    elif result.rejected:
+        print(f"rejected        : {result.rejected}")
+    for name, path in result.files.items():
+        print(f"  {name:<20} {path}")
+    for warning in result.warnings:
+        print(f"warning         : {warning}")
+    return 0 if (result.approved or args.no_generate) else 1
+
+
+def cmd_volume(args: argparse.Namespace) -> int:
+    """Rank the house root pool by relative search volume."""
+    from .discovery import volume as volume_mod
+    from .discovery.engine import DiscoveryConfig, DiscoveryEngine
+
+    settings = _settings(args)
+    engine = DiscoveryEngine(
+        settings,
+        config=DiscoveryConfig(geo=settings.trends_geo, timeframe=settings.trends_timeframe,
+                               anchors=[], max_candidates=10_000, keep=1, use_llm=False),
+        log=lambda line: print(line, flush=True),
+    )
+    try:
+        report = volume_mod.discover(engine, timeframe=settings.trends_timeframe,
+                                     log=lambda line: print(line, flush=True))
+    except volume_mod.VolumeDiscoveryError as error:
+        print(f"stopped: {error}")
+        return 1
+
+    path = volume_mod.write_report(report, settings.runs_dir)
+    print(f"\n=== relative search volume ({report.benchmark} = 100) ===")
+    for index, row in enumerate([r for r in report.ranking if r.relative_volume > 0][:20], 1):
+        print(f"{index:>2}. {row.topic:<26} {row.relative_volume:>9.2f}")
+    print(f"\nselected: {report.selected.topic if report.selected else '—'} "
+          f"(volume {report.selected_volume:.2f}, score {report.selected_score:.2f})")
+    print(f"coverage: {report.coverage:.0%} · report: {path}")
+    return 0
 
 
 def cmd_app(args: argparse.Namespace) -> int:
@@ -268,6 +353,28 @@ def build_parser() -> argparse.ArgumentParser:
     auto.add_argument("--no-mockup", action="store_true")
     auto.add_argument("--no-llm", action="store_true")
     auto.set_defaults(func=cmd_autopilot)
+
+    house = sub.add_parser("house", help="the house system end to end (V9): route, one paid image, proof")
+    house.add_argument("--topic", default="", help="override discovery with a market signal")
+    house.add_argument("--garment", default=None)
+    house.add_argument("--aggressiveness", type=int, default=3)
+    house.add_argument("--budget", type=int, default=1, choices=(1, 2), help="paid generations allowed")
+    house.add_argument("--allow-edit", action="store_true", help="a second call may edit the first candidate")
+    house.add_argument("--allow-concept-retry", action="store_true",
+                       help="a second call may follow a rebuilt route after a concept failure")
+    house.add_argument("--no-critic", action="store_true", help="accept on deterministic proof alone")
+    house.add_argument("--no-statement", action="store_true", help="do not typeset the printed statement")
+    house.add_argument("--statement", default="", help="author the printed statement yourself (4-8 words)")
+    house.add_argument("--anchor", default="", choices=["", "auto", "upper-left", "upper-right", "low-left", "low-right"])
+    house.add_argument("--reuse-raw", default="", help="reuse a raw frame from an interrupted run (no paid call)")
+    house.add_argument("--no-generate", action="store_true", help="stop after the blueprint and prompt")
+    house.add_argument("--no-mockup", action="store_true")
+    house.add_argument("--no-llm", action="store_true")
+    house.add_argument("--keep-style-lock", action="store_true")
+    house.set_defaults(func=cmd_house)
+
+    volume = sub.add_parser("volume", help="rank the house root pool by relative search volume")
+    volume.set_defaults(func=cmd_volume)
 
     app = sub.add_parser("app", help="launch the Gradio control room")
     app.add_argument("--host", default="127.0.0.1")

@@ -104,7 +104,8 @@ likeness and trademark risk. Rejections are listed in the UI with their category
 | **④ Studio** | the design pipeline on one topic: live log, reference board, ranked concepts, prompts, artwork, print package |
 | **⑤ Monitor** | every past run: report, assets, log, disk use |
 | **⑥ Schedule** | autopilot on a cadence (rediscovers every firing), or a planned collection of topics |
-| **⑦ Deploy** | Dockerfile, compose, systemd unit, Windows task and HF Space entry point, filled in with your port and paths |
+| **⑦ House V9** | the house system end to end: creative route, owned blueprint, one paid image, measured proof, packaged delivery |
+| **⑧ Deploy** | Dockerfile, compose, systemd unit, Windows task and HF Space entry point, filled in with your port and paths |
 
 ---
 
@@ -135,6 +136,53 @@ constraints forbid copied compositions, brand marks and reproduced artwork.
 `runs/<collection>/style_lock.json`; every later run inherits its composition
 philosophy, texture language, typography behaviour, colour discipline and
 palette. Subjects change, the visual language does not.
+
+---
+
+## The house system (V9)
+
+Beyond the generic pipeline there is a **house system**: one real material fact,
+transformed once, placed off-centre, finished with one printed sentence — and
+proved before it ships.
+
+```bash
+python -m archivist house                       # discovery → route → art → proof → delivery
+python -m archivist house --topic harbor        # skip discovery, keep everything else
+python -m archivist house --no-generate         # blueprint, prompt contract and listing only
+python -m archivist house --budget 2 --allow-edit          # allow one controlled edit
+python -m archivist house --reuse-raw runs/.../B_paid_01_raw.png   # recover, no new spend
+python -m archivist volume                      # rank the root pool by relative search volume
+```
+
+| guarantee | how |
+|---|---|
+| **owned conditioning** | only a blueprint this code draws reaches the image model; searched references inform the brief, never the pixels |
+| **a nameable subject** | the blueprint carries the subject's silhouette archetype (arm, tower, plate, strata, truss, hull, wall) and the prompt names it — the fix for a real failure where a strong composition read as generic rubble and the critic scored `subject_truth: 3` |
+| **real typography** | the statement is typeset from a real font at a measured cap height (≥2.4mm), after generation, and the runtime is proved *before* anything is paid for |
+| **budget discipline** | one paid generation by default; a second only for a stated reason — a controlled edit, or a route rebuilt from the critic's own words |
+| **no false finals** | a candidate that fails the proof is packaged as `REJECTED_review.zip` with every measurement, not shipped |
+
+### What the proof measures
+
+Deterministic first, and free: asymmetry and mass shift, hero envelope, mode-aware
+ink coverage, clean canvas edges, statement contrast and cap height. Only a
+candidate that passes all of them is shown to the vision critic, which judges the
+pixels on ten axes and must clear 82/100 with no critical score below 8.
+
+Failure classes decide whether money can help at all — `technical` is repaired
+locally for free, `local-edit` can be fixed by a controlled edit, and `concept`
+means the subject was wrong, so the route is rebuilt before any second call.
+
+### Volume-first discovery
+
+Growth alone finds risers nobody searches for. The house asks demand first: broad
+one- and two-word roots are compared in Google Trends against a shared benchmark
+(`archive` = 100), which is the only way separate requests are comparable. Trends
+throttles freely, so batches retry with backoff and honour `Retry-After`, and if
+fewer than 80% of the pool answered the ranking is abandoned rather than chosen
+from holes. Only the leading quartile gets the expensive per-topic measurement,
+and an intent gate then rejects leaders whose meaning is too ambiguous to design.
+
 
 ---
 
@@ -189,6 +237,10 @@ Every setting is an environment variable or a field in the Setup tab — see
 | `ARCHIVIST_MAX_COMPETITION` | `70` | crowding ceiling, 0–100 |
 | `ARCHIVIST_MIN_SOCIAL` | `12` | social heat floor, 0–100 |
 | `ARCHIVIST_AUTOPILOT_DESIGNS` | `1` | designs produced per autopilot cycle |
+| `ARCHIVIST_PAID_BUDGET` | `1` | paid generations per house design |
+| `ARCHIVIST_REQUIRE_CRITIC` | `1` | no final without the vision critic |
+| `ARCHIVIST_ANCHOR` | `auto` | which corner the hero mass enters from |
+| `ARCHIVIST_REDDIT_ANONYMOUS` | `1` | set `0` on cloud IPs that Reddit 403s |
 | `ARCHIVIST_COLLECTION` | `default` | collections share a style lock |
 | `ARCHIVIST_OFFLINE` | `0` | `1` = synthetic signals and references, no network, no spend |
 
@@ -210,11 +262,14 @@ it holds API keys, and an autopilot schedule spends credits on a timer.
 ./scripts/linux/archivist.sh test      # or: python -m pytest -q tests
 ```
 
-69 tests, all offline, no keys, no credits: growth and momentum maths, screening
+115 tests, all offline, no keys, no credits: growth and momentum maths, screening
 refusals, opportunity thresholds, correlation (including "merely both rising is
 not a correlation"), competition counting, Reddit heat, the full discovery cycle,
 autopilot writing its evidence into a manifest, scheduler cadences, `.env`
-handling and the app surface.
+handling, the app surface — and for the house system: statement rules, silhouette
+archetypes (including the exact breakwater case that failed), blueprint geometry,
+typography legibility, local repair of generated leakage, the proof's hard checks,
+budget arithmetic, zero-cost recovery, and the rejection package.
 
 ## Requirements
 

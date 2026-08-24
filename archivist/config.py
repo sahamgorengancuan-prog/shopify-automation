@@ -119,6 +119,16 @@ class Settings:
     discovery_candidates: int = 24
     discovery_keep: int = 6
     autopilot_designs: int = 1
+    reddit_allow_anonymous: bool = True
+
+    # --- house system (V9) ------------------------------------------------
+    house_paid_budget: int = 1            # paid generations per design, 1 or 2
+    house_allow_controlled_edit: bool = False
+    house_allow_concept_retry: bool = False
+    house_require_critic: bool = True
+    house_print_statement: bool = True
+    house_anchor: str = "auto"            # auto | upper-left | upper-right | low-left | low-right
+    house_statement_override: str = ""
 
     # --- mining ----------------------------------------------------------
     max_queries: int = 24
@@ -179,6 +189,14 @@ class Settings:
             discovery_candidates=_int("ARCHIVIST_DISCOVERY_CANDIDATES", 24),
             discovery_keep=_int("ARCHIVIST_DISCOVERY_KEEP", 6),
             autopilot_designs=_int("ARCHIVIST_AUTOPILOT_DESIGNS", 1),
+            reddit_allow_anonymous=_bool("ARCHIVIST_REDDIT_ANONYMOUS", True),
+            house_paid_budget=_int("ARCHIVIST_PAID_BUDGET", 1),
+            house_allow_controlled_edit=_bool("ARCHIVIST_ALLOW_CONTROLLED_EDIT", False),
+            house_allow_concept_retry=_bool("ARCHIVIST_ALLOW_CONCEPT_RETRY", False),
+            house_require_critic=_bool("ARCHIVIST_REQUIRE_CRITIC", True),
+            house_print_statement=_bool("ARCHIVIST_PRINT_STATEMENT", True),
+            house_anchor=os.environ.get("ARCHIVIST_ANCHOR", "auto").strip() or "auto",
+            house_statement_override=os.environ.get("ARCHIVIST_STATEMENT", "").strip(),
             max_queries=_int("ARCHIVIST_MAX_QUERIES", 24),
             candidates_per_query=_int("ARCHIVIST_CANDIDATES_PER_QUERY", 6),
             max_candidates=_int("ARCHIVIST_MAX_CANDIDATES", 60),

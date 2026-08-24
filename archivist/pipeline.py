@@ -50,6 +50,8 @@ class PipelineOptions:
     use_llm: bool = True
     # Set by autopilot: the evidence behind an automatically chosen topic.
     discovery: dict = field(default_factory=dict)
+    # Set by the house system: an audited creative route that narrows every stage.
+    house_route: dict | None = None
     context_roles: list[str] = field(
         default_factory=lambda: [Role.HERO.value, Role.TEXTURE.value, Role.COMPOSITION.value, Role.TYPOGRAPHY.value]
     )
@@ -153,6 +155,16 @@ def run(
     )
 
     try:
+        house = None
+        if options.house_route:
+            from .house.mode import HouseMode
+
+            house = HouseMode(options.house_route)
+            reporter.say(
+                f"house mode: {options.house_route['product_title']} — "
+                f"{options.house_route['real_subject']} / {options.house_route['mutation']}"
+            )
+
         llm = LLM(
             settings.openai_api_key,
             model=settings.openai_model,
@@ -167,13 +179,18 @@ def run(
             topic, audience=options.audience, aggressiveness=options.aggressiveness,
             seed=settings.seed, llm=llm,
         )
+        if house:
+            ladder = house.ladder(ladder)
         result.ladder = ladder
         reporter.say(f"micro-niche: {ladder.micro_niche}", STAGE_WEIGHTS["trend"])
         reporter.check_cancel()
 
         # 2 — queries -----------------------------------------------------
-        search_queries = queries_mod.generate_queries(
-            topic, ladder, count=settings.max_queries, seed=settings.seed, llm=llm
+        search_queries = (
+            house.queries(count=settings.max_queries) if house
+            else queries_mod.generate_queries(
+                topic, ladder, count=settings.max_queries, seed=settings.seed, llm=llm
+            )
         )
         result.queries = search_queries
         dump_json([q.to_dict() for q in search_queries], run_dir / "queries.json")
@@ -208,14 +225,20 @@ def run(
             )
 
         # 5/6 — scoring + roles -------------------------------------------
-        selected, notes = select_references(
-            candidates,
-            topic_terms=keywords(topic),
-            keep=settings.keep_references,
-            minimum=settings.min_reference_score,
-        )
+        if house:
+            selected, notes = house.select(
+                candidates, select_references,
+                keep=settings.keep_references, minimum=settings.min_reference_score,
+            )
+        else:
+            selected, notes = select_references(
+                candidates,
+                topic_terms=keywords(topic),
+                keep=settings.keep_references,
+                minimum=settings.min_reference_score,
+            )
         result.warnings.extend(notes)
-        references: list[Reference] = assign_roles(selected)
+        references: list[Reference] = house.assign(selected) if house else assign_roles(selected)
         result.references = references
         reporter.say(
             f"kept {len(references)} references — roles: "
@@ -230,11 +253,15 @@ def run(
             references, ladder, garment=options.garment,
             aggressiveness=options.aggressiveness, llm=llm,
         )
+        if house:
+            dna = house.dna(dna)
         lock = direction_mod.load_lock(settings.runs_dir, settings.collection)
         art_direction = direction_mod.synthesise(
             ladder, dna, references, seed=settings.seed,
             aggressiveness=options.aggressiveness, lock=lock, llm=llm,
         )
+        if house:
+            art_direction = house.direction(art_direction)
         result.direction = art_direction
         direction_mod.save_lock(settings.runs_dir, settings.collection, art_direction)
         reporter.say(
@@ -250,22 +277,33 @@ def run(
             ladder, art_direction, references,
             aggressiveness=options.aggressiveness, seed=settings.seed,
         ) if c.key in wanted]
+        if house:
+            concepts = house.concepts(concepts)
         for concept in concepts:
-            gate.enforce(
-                concept, art_direction, ladder, references,
-                seed=settings.seed, garment=options.garment,
-            )
-            concept.prompt = prompts.build_prompt(
-                concept, art_direction, ladder, references,
-                garment=options.garment, include_text=options.include_text,
-            )
+            if house:
+                # The house route was already audited; the gate here is the
+                # structural contract that must hold before anything is paid for.
+                concept.prompt = house.prompt(
+                    concept, art_direction, ladder, references, garment=options.garment,
+                )
+                concept.negative_prompt = "; ".join(options.house_route.get("avoid", []))
+                concept.gate = house.gate(concept, art_direction, ladder, references)
+            else:
+                gate.enforce(
+                    concept, art_direction, ladder, references,
+                    seed=settings.seed, garment=options.garment,
+                )
+                concept.prompt = prompts.build_prompt(
+                    concept, art_direction, ladder, references,
+                    garment=options.garment, include_text=options.include_text,
+                )
             (run_dir / "prompts").mkdir(exist_ok=True)
             (run_dir / "prompts" / f"{concept.key}.txt").write_text(concept.prompt, encoding="utf-8")
             (run_dir / "prompts" / f"{concept.key}_negative.txt").write_text(
                 concept.negative_prompt, encoding="utf-8"
             )
         result.concepts = concepts
-        result.recommended = recommend(concepts)
+        result.recommended = house.recommend(concepts) if house else recommend(concepts)
         reporter.say(
             "concepts: " + ", ".join(f"{c.key}={c.overall}" for c in concepts)
             + f" — recommended {result.recommended}",
@@ -324,8 +362,13 @@ def run(
             reporter.say("generation skipped: no BFL key configured")
 
         # 14 — brief, report, manifest ------------------------------------
-        for concept in concepts:
-            brief.write_brief(result, concept)
+        if house:
+            house_brief = house.brief(references)
+            for concept in concepts:
+                (run_dir / f"brief_{concept.key}.md").write_text(house_brief, encoding="utf-8")
+        else:
+            for concept in concepts:
+                brief.write_brief(result, concept)
         brief.write_report(result)
         dump_json(result, run_dir / "manifest.json")
         reporter.say(f"run complete → {run_dir}", 1.0)

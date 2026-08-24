@@ -8,7 +8,8 @@ Six tabs, one job each:
   ④ STUDIO      run the pipeline with a live log, galleries and print packages
   ⑤ MONITOR     every past run, its report, its assets, its log
   ⑥ SCHEDULE    autopilot on a cadence, or a planned collection of topics
-  ⑦ DEPLOY      Docker / systemd / Windows Task / HF Space, written out filled in
+  ⑦ HOUSE V9    the house system: owned blueprint, one paid image, measured proof
+  ⑧ DEPLOY      Docker / systemd / Windows Task / HF Space, written out filled in
 
 Run it with ``python -m archivist.app`` (or the .bat / .sh launchers).
 """
@@ -79,6 +80,8 @@ class AppState:
         self.discovery_log: deque[str] = deque(maxlen=500)
         self.last_discovery: Any = None
         self.staged_topic: str = ""
+        self.house_log: deque[str] = deque(maxlen=500)
+        self.last_house: Any = None
 
     def _on_event(self, message: str) -> None:
         self.sched_log.append(f"{datetime.now().strftime('%H:%M:%S')}  {message}")
@@ -1289,8 +1292,227 @@ def schedule_tab() -> None:
                         outputs=[action_note, jobs_df, history_df])
 
 
+
 # --------------------------------------------------------------------------
-# ⑥ deploy
+# ⑦ house system (V9)
+# --------------------------------------------------------------------------
+def _house_files(result) -> list[str]:
+    files: list[str] = []
+    if result.delivery:
+        for path in sorted(Path(result.delivery.final_dir).iterdir()):
+            if path.is_file():
+                files.append(str(path))
+    elif result.rejected and Path(result.rejected).is_file():
+        files.append(result.rejected)
+    return files
+
+
+def _house_gallery(result) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    if result.delivery:
+        final = Path(result.delivery.final_dir)
+        for name, caption in (
+            ("FINAL_mockup.png", "garment proof"), ("FINAL_artwork.png", "composed artwork"),
+            ("FINAL_print.png", "print file"), ("FINAL_blueprint.png", "owned blueprint"),
+        ):
+            if (final / name).is_file():
+                pairs.append((str(final / name), caption))
+        return pairs
+    for candidate in (result.delivery.candidates if result.delivery else []):
+        for key in ("artwork_path", "normalised_artwork_path", "raw_artwork_path"):
+            path = candidate.get(key)
+            if path and Path(path).is_file():
+                pairs.append((path, f"{candidate['global_index']}: {key.replace('_', ' ')}"))
+    return pairs
+
+
+def _route_markdown(result) -> str:
+    route = result.route
+    if not route:
+        return "_no route_"
+    lines = [
+        f"### {route['product_title']}",
+        f"_{route['metaphor']}_", "",
+        f"- **market signal:** {route['market_signal']}",
+        f"- **evidence:** {route['real_subject']} — {route['source_property']}",
+        f"- **one mutation:** {route['mutation']}",
+        f"- **silhouette archetype:** {(route.get('silhouette') or {}).get('label', '—')} "
+        f"({(route.get('silhouette') or {}).get('requirement', '')})",
+        f"- **hero:** {route['hero_motif']}",
+        f"- **interruption:** {route['signature_interruption']}",
+        f"- **placement:** {route['placement_logic']}",
+        f"- **statement on the garment:** **{route['statement']}** ({route['statement_lockup']})",
+        f"- **palette:** {', '.join(route['palette'])}",
+    ]
+    if result.delivery:
+        measured = result.delivery.selected.get("measured", {})
+        review = result.delivery.selected.get("visual_review", {})
+        lines += [
+            "", "**Proof**",
+            f"- hard checks: {measured.get('hard_checks')}",
+            f"- heuristic total {measured.get('heuristic_total')} · ink {measured.get('ink_coverage')}% "
+            f"(expected {measured.get('expected_ink_range')})",
+            f"- vision total {review.get('total', '—')} · {review.get('reason', '')}",
+            f"- paid generations used: {result.delivery.paid_calls}",
+        ]
+    elif result.rejected:
+        lines += ["", f"**Rejected** — diagnosis package: `{result.rejected}`"]
+    for warning in result.warnings[:6]:
+        lines.append(f"- warning: {warning}")
+    return "\n".join(lines)
+
+
+def house_run(topic: str, collection: str, garment: str, aggressiveness: int, budget: int,
+              allow_edit: bool, allow_concept_retry: bool, require_critic: bool,
+              print_statement: bool, statement: str, anchor: str, reuse_raw: str,
+              generate: bool, offline: bool):
+    """The whole house system, streamed."""
+    from .house import HouseBlocked, RenderOptions, run_session
+
+    STATE.house_log.clear()
+    settings = STATE.refresh_settings(
+        offline=bool(offline), collection=collection.strip() or "default", garment=garment,
+    )
+    if statement.strip():
+        settings.house_statement_override = statement.strip()
+    settings.house_anchor = anchor or "auto"
+
+    options = PipelineOptions(garment=garment, aggressiveness=int(aggressiveness))
+    render_options = RenderOptions(
+        budget=int(budget), allow_controlled_edit=bool(allow_edit),
+        allow_concept_retry=bool(allow_concept_retry), require_critic=bool(require_critic),
+        print_statement=bool(print_statement), reuse_raw=reuse_raw.strip(), seed=settings.seed,
+    )
+
+    events: queue.Queue = queue.Queue()
+    box: dict[str, Any] = {}
+    state = {"fraction": 0.0, "message": "starting"}
+    STATE.cancel.clear()
+
+    def worker() -> None:
+        try:
+            box["result"] = run_session(
+                settings, options, topic=topic.strip(), render_options=render_options,
+                generate=bool(generate),
+                progress=lambda fraction, message: (
+                    state.__setitem__("fraction", fraction), state.__setitem__("message", message)
+                ),
+                log=STATE.house_log.append, cancel=STATE.cancel.is_set,
+            )
+        except HouseBlocked as blocked:
+            box["blocked"] = str(blocked)
+        except Exception as exc:
+            box["error"] = exc
+        finally:
+            events.put(None)
+
+    thread = threading.Thread(target=worker, name="archivist-house", daemon=True)
+    thread.start()
+    while thread.is_alive():
+        try:
+            events.get(timeout=0.4)
+            break
+        except queue.Empty:
+            pass
+        yield (
+            f"`{_bar(state['fraction'])}` **{state['fraction'] * 100:4.0f}%** — {state['message']}",
+            "\n".join(list(STATE.house_log)[-300:]), gr.update(), gr.update(), gr.update(),
+        )
+    thread.join(timeout=1.0)
+
+    log_text = "\n".join(list(STATE.house_log)[-300:])
+    if "blocked" in box:
+        yield (f"⛔ blocked before spending anything — {box['blocked']}", log_text,
+               gr.update(), gr.update(), gr.update())
+        return
+    if "error" in box:
+        yield (f"❌ {type(box['error']).__name__}: {box['error']}", log_text,
+               gr.update(), gr.update(), gr.update())
+        return
+
+    result = box["result"]
+    STATE.last_house = result
+    if result.approved:
+        status = (
+            f"✅ approved — **{result.route['product_title']}**, "
+            f"{result.delivery.paid_calls} paid generation(s) → `{result.delivery.final_dir}`"
+        )
+    elif result.rejected:
+        status = f"⛔ rejected by the proof — no false final was packaged. Diagnosis: `{result.rejected}`"
+    else:
+        status = f"📋 prepared without generating — **{result.route['product_title']}**"
+    yield status, log_text, _house_gallery(result), _route_markdown(result), _house_files(result)
+
+
+def house_tab() -> None:
+    gr.Markdown(
+        "### ⑦ House system (V9)\n"
+        "One real material fact, transformed once, placed off-centre, finished with one printed "
+        "sentence. Only an owned blueprint conditions the image model; the statement is typeset by "
+        "code; one paid generation is the default, and nothing ships unless the measured proof passes."
+    )
+    with gr.Row():
+        with gr.Column(scale=2):
+            topic = gr.Textbox(label="Market signal (blank = volume-first discovery decides)",
+                               placeholder="harbor, radar, lighthouse…")
+            with gr.Row():
+                collection = gr.Textbox(value=STATE.settings.collection, label="Collection")
+                garment = gr.Dropdown(GARMENTS, value=STATE.settings.garment, label="Garment")
+                anchor = gr.Dropdown(["auto", "upper-left", "upper-right", "low-left", "low-right"],
+                                     value=STATE.settings.house_anchor, label="Asymmetry anchor")
+            aggressiveness = gr.Slider(0, 10, value=3, step=1, label="Aggressiveness")
+            statement = gr.Textbox(label="Statement override (optional, 4-8 words)",
+                                   placeholder="leave blank to let the route write it")
+            with gr.Accordion("Budget and proof", open=True):
+                with gr.Row():
+                    budget = gr.Radio([1, 2], value=STATE.settings.house_paid_budget,
+                                      label="Paid generations allowed")
+                    generate = gr.Checkbox(value=True, label="Generate (spends BFL credits)")
+                with gr.Row():
+                    allow_edit = gr.Checkbox(value=STATE.settings.house_allow_controlled_edit,
+                                             label="Allow one controlled edit")
+                    allow_concept_retry = gr.Checkbox(value=STATE.settings.house_allow_concept_retry,
+                                                      label="Allow a rebuilt route on a concept failure")
+                with gr.Row():
+                    require_critic = gr.Checkbox(value=STATE.settings.house_require_critic,
+                                                 label="Require the vision critic")
+                    print_statement = gr.Checkbox(value=STATE.settings.house_print_statement,
+                                                  label="Print the statement")
+                reuse_raw = gr.Textbox(label="Reuse a raw frame (zero-cost recovery)",
+                                       placeholder="path to B_paid_01_raw.png from an interrupted run")
+                offline = gr.Checkbox(value=STATE.settings.offline,
+                                      label="Offline mode (synthesised frame, no credits)")
+            with gr.Row():
+                run_button = gr.Button("Run the house system", variant="primary", scale=3)
+                cancel_button = gr.Button("Cancel", variant="stop", scale=1)
+        with gr.Column(scale=3):
+            status = gr.Markdown("_idle_", elem_classes="arc-status")
+            log = gr.Textbox(label="Live log", lines=18, interactive=False, autoscroll=True)
+
+    with gr.Tabs():
+        with gr.Tab("Proof"):
+            gallery = gr.Gallery(label="Mockup · artwork · print file · blueprint", columns=4,
+                                 height=460, object_fit="contain")
+        with gr.Tab("Creative route"):
+            route_md = gr.Markdown("_run the house system to see the route and its proof_")
+        with gr.Tab("Delivery"):
+            files = gr.File(label="Approved delivery (or the rejection diagnosis)",
+                            file_count="multiple", interactive=False)
+
+    event = run_button.click(
+        house_run,
+        inputs=[topic, collection, garment, aggressiveness, budget, allow_edit, allow_concept_retry,
+                require_critic, print_statement, statement, anchor, reuse_raw, generate, offline],
+        outputs=[status, log, gallery, route_md, files],
+    )
+    cancel_button.click(
+        lambda: (STATE.cancel.set(), "⏹ cancelling after the current step…")[1],
+        outputs=status, cancels=[event],
+    )
+
+
+# --------------------------------------------------------------------------
+# ⑧ deploy
 # --------------------------------------------------------------------------
 def write_deploy(port: int, image: str, user: str, workdir: str, windows_workdir: str, target: str):
     target_dir = Path(target.strip() or "deploy")
@@ -1327,7 +1549,7 @@ def write_deploy(port: int, image: str, user: str, workdir: str, windows_workdir
 
 def deploy_tab() -> None:
     gr.Markdown(
-        "### ⑥ Deploy\n"
+        "### ⑧ Deploy\n"
         "Write out deployment artefacts already filled in with your port and paths: a Dockerfile and "
         "compose file, a systemd unit for Ubuntu, a Windows scheduled-task definition, and a Hugging "
         "Face Space entry point."
@@ -1409,7 +1631,9 @@ def build_app() -> gr.Blocks:
                 monitor_tab()
             with gr.Tab("⑥ Schedule"):
                 schedule_tab()
-            with gr.Tab("⑦ Deploy"):
+            with gr.Tab("⑦ House V9"):
+                house_tab()
+            with gr.Tab("⑧ Deploy"):
                 deploy_tab()
         gr.Markdown(
             "References are ingredients, never targets — nothing mined is reproduced in the output. "

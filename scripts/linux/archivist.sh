@@ -6,6 +6,9 @@
 #    ./archivist.sh app                   launch the Gradio control room
 #    ./archivist.sh app --host 0.0.0.0    serve it on the network
 #    ./archivist.sh check                 connection self-test
+#    ./archivist.sh house                 V9 house system end to end
+#    ./archivist.sh house --topic harbor  house system on a chosen signal
+#    ./archivist.sh volume                rank roots by relative search volume
 #    ./archivist.sh run "deep sea salvage" [--no-generate ...]
 #    ./archivist.sh plan "north sea oil" -n 6 --create
 #    ./archivist.sh scheduler             run the scheduler headless
@@ -112,6 +115,8 @@ cmd_app() {
 }
 
 cmd_run()       { ensure_env; exec "$PY" -m archivist run "$@"; }
+cmd_house()     { ensure_env; banner "house system"; exec "$PY" -m archivist house "$@"; }
+cmd_volume()    { ensure_env; exec "$PY" -m archivist volume "$@"; }
 cmd_check()     { ensure_env; exec "$PY" -m archivist check "$@"; }
 cmd_plan()      { ensure_env; exec "$PY" -m archivist plan "$@"; }
 cmd_runs()      { ensure_env; exec "$PY" -m archivist runs "$@"; }
@@ -170,7 +175,7 @@ cmd_all() {
 }
 
 usage() {
-    sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,21p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 main() {
@@ -180,6 +185,8 @@ main() {
         setup)      cmd_setup "$@" ;;
         app|ui|gui) cmd_app "$@" ;;
         run)        cmd_run "$@" ;;
+        house)      cmd_house "$@" ;;
+        volume)     cmd_volume "$@" ;;
         check)      cmd_check "$@" ;;
         plan)       cmd_plan "$@" ;;
         runs)       cmd_runs "$@" ;;

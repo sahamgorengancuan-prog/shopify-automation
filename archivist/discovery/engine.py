@@ -33,6 +33,24 @@ from .reddit import Reddit
 from .scoring import Thresholds, rank, score
 from .social import MetaSignals, XSignals
 
+
+class _SkippedReddit:
+    """Stands in for Reddit when anonymous access is knowingly unavailable."""
+
+    name = "reddit"
+    authenticated = False
+
+    def heat(self, query: str, **_kwargs):
+        from .reddit import RedditHeat
+
+        return RedditHeat(
+            query=query, ok=False,
+            error="anonymous Reddit disabled (set REDDIT_CLIENT_ID/SECRET or ARCHIVIST_REDDIT_ANONYMOUS=1)",
+        )
+
+    def hot(self, subreddit: str = "all", **_kwargs):
+        return []
+
 Progress = Callable[[float, str], None]
 Log = Callable[[str], None]
 Cancel = Callable[[], bool]
@@ -102,6 +120,10 @@ class DiscoveryEngine:
                 user_agent=settings.reddit_user_agent,
                 timeout=settings.http_timeout,
             )
+            if not self.reddit.authenticated and not settings.reddit_allow_anonymous:
+                # Hosted notebooks and cloud IPs are routinely 403'd by Reddit;
+                # skipping is cheaper than 24 failed requests per cycle.
+                self.reddit = _SkippedReddit()
             self.x = XSignals(bearer_token=settings.x_bearer_token, timeout=settings.http_timeout)
             self.meta = MetaSignals(
                 access_token=settings.meta_access_token,

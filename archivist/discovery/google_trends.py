@@ -16,6 +16,7 @@ for the length of a discovery cycle.
 from __future__ import annotations
 
 import json
+import random
 import re
 import time
 import urllib.parse
@@ -133,8 +134,10 @@ class GoogleTrends:
         self.user_agent = user_agent
         self.cache_dir = Path(cache_dir) if cache_dir else None
         self.last_error = ""
+        self.throttled = 0
         self._session = None
         self._cookies_ready = False
+        self._widget_cache: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
 
     # -- transport --------------------------------------------------------
     @property
@@ -154,20 +157,46 @@ class GoogleTrends:
             pass
         self._cookies_ready = True
 
-    def _get(self, url: str, params: dict[str, Any]) -> Any:
+    def _get(self, url: str, params: dict[str, Any], *, attempts: int = 3) -> Any:
+        """One Trends request, with the throttling this endpoint actually does.
+
+        Trends answers 429 freely and sometimes sends Retry-After. Backing off
+        here (rather than failing the caller) is what keeps a long discovery
+        cycle from collapsing into partial data.
+        """
         self._warm_cookies()
-        time.sleep(self.request_delay)
-        if self.session is not None:
-            response = self.session.get(url, params=params, timeout=self.timeout)
-            if response.status_code >= 400:
-                raise http.HttpError(f"{url} -> HTTP {response.status_code}", response.status_code)
-            return _strip_guard(response.content)
-        status, content = http.request(
-            "GET", url, params=params, timeout=self.timeout, user_agent=self.user_agent, retries=2
-        )
-        if status >= 400:
-            raise http.HttpError(f"{url} -> HTTP {status}", status)
-        return _strip_guard(content)
+        last_error: Exception | None = None
+        for attempt in range(max(1, attempts)):
+            time.sleep(self.request_delay)
+            try:
+                if self.session is not None:
+                    response = self.session.get(url, params=params, timeout=self.timeout)
+                    status, content, headers = response.status_code, response.content, response.headers
+                else:
+                    status, content = http.request(
+                        "GET", url, params=params, timeout=self.timeout,
+                        user_agent=self.user_agent, retries=1,
+                    )
+                    headers = {}
+                if status == 429:
+                    self.throttled += 1
+                    wait = _retry_after(headers) or (2.0 ** (attempt + 1) + random.random())
+                    last_error = http.HttpError(f"{url} -> HTTP 429 (throttled)", 429)
+                    if attempt + 1 < attempts:
+                        time.sleep(min(30.0, wait))
+                        continue
+                    raise last_error
+                if status >= 400:
+                    raise http.HttpError(f"{url} -> HTTP {status}", status)
+                return _strip_guard(content)
+            except http.HttpError:
+                raise
+            except Exception as exc:
+                last_error = exc
+                if attempt + 1 >= attempts:
+                    break
+                time.sleep(2.0 ** (attempt + 1))
+        raise http.HttpError(f"{url}: {last_error}")
 
     # -- cache ------------------------------------------------------------
     def _cached(self, key: str) -> Any | None:
@@ -228,6 +257,14 @@ class GoogleTrends:
         return rows
 
     def _widgets(self, keyword: str, timeframe: str | None = None) -> list[dict[str, Any]]:
+        """Explore tokens for one keyword, cached per process.
+
+        The timeseries and the rising-query widgets come from the *same* explore
+        response, so caching halves the requests for every candidate measured.
+        """
+        cache_key = (keyword, timeframe or self.timeframe, self.geo)
+        if cache_key in self._widget_cache:
+            return self._widget_cache[cache_key]
         request = {
             "comparisonItem": [
                 {"keyword": keyword, "geo": self.geo, "time": timeframe or self.timeframe}
@@ -236,10 +273,59 @@ class GoogleTrends:
             "property": "",
         }
         payload = self._get(
-            EXPLORE,
-            {"hl": self.hl, "tz": "0", "req": json.dumps(request, separators=(",", ":")), "tz": "0"},
+            EXPLORE, {"hl": self.hl, "tz": "0", "req": json.dumps(request, separators=(",", ":"))}
         )
-        return payload.get("widgets", []) if isinstance(payload, dict) else []
+        widgets = payload.get("widgets", []) if isinstance(payload, dict) else []
+        self._widget_cache[cache_key] = widgets
+        return widgets
+
+    def compare(self, terms: list[str], *, benchmark: str = "archive",
+                timeframe: str | None = None) -> dict[str, float]:
+        """Relative search volume for several terms against one shared benchmark.
+
+        Trends only ever returns *relative* numbers, so terms measured in
+        different requests are not comparable. Sending them in one comparison
+        with a fixed benchmark (benchmark = 100) makes a ranking meaningful —
+        and costs one request per four terms instead of one per term.
+        """
+        terms = [term for term in terms if term]
+        if not terms:
+            return {}
+        payload_terms = [benchmark] + terms
+        request = {
+            "comparisonItem": [
+                {"keyword": term, "geo": self.geo, "time": timeframe or self.timeframe}
+                for term in payload_terms
+            ],
+            "category": 0,
+            "property": "",
+        }
+        explore = self._get(
+            EXPLORE, {"hl": self.hl, "tz": "0", "req": json.dumps(request, separators=(",", ":"))}
+        )
+        widgets = explore.get("widgets", []) if isinstance(explore, dict) else []
+        widget = next((item for item in widgets if item.get("id") == "TIMESERIES"), None)
+        if widget is None:
+            raise http.HttpError("no TIMESERIES widget in the comparison response")
+
+        payload = self._get(
+            MULTILINE,
+            {
+                "hl": self.hl, "tz": "0",
+                "req": json.dumps(widget["request"], separators=(",", ":")),
+                "token": widget["token"],
+            },
+        )
+        rows = (payload.get("default", {}) or {}).get("timelineData", [])
+        columns: dict[str, list[float]] = {term: [] for term in payload_terms}
+        for row in rows:
+            values = row.get("value", []) or []
+            for index, term in enumerate(payload_terms):
+                if index < len(values):
+                    columns[term].append(float(values[index] or 0))
+        means = {term: (sum(values) / len(values) if values else 0.0) for term, values in columns.items()}
+        base = means.get(benchmark, 0.0) or 0.01
+        return {term: round(100.0 * means.get(term, 0.0) / base, 2) for term in terms}
 
     def interest_over_time(self, keyword: str, timeframe: str | None = None) -> InterestSeries:
         cache_key = f"series-{_slug(keyword)}-{_slug(timeframe or self.timeframe)}-{self.geo}"
@@ -327,6 +413,15 @@ class GoogleTrends:
         if rows:
             return True, f"ok — {len(rows)} trending now in {self.geo}: {rows[0]['title'][:40]}"
         return False, self.last_error or "no trending data returned (rate limited or geo unsupported)"
+
+
+def _retry_after(headers: Any) -> float:
+    """Honour Retry-After when Trends sends it; fall back to exponential backoff."""
+    try:
+        value = (headers or {}).get("Retry-After") or (headers or {}).get("retry-after")
+        return float(value) if value else 0.0
+    except (TypeError, ValueError, AttributeError):
+        return 0.0
 
 
 def _traffic_to_int(label: str) -> int:
