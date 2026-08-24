@@ -179,6 +179,7 @@ def _finalise(route: dict[str, Any], market_signal: str, anchor: str) -> dict[st
     """Apply the parts of the contract the model is never allowed to author."""
     shape = silhouette_mod.choose(str(route.get("real_subject", "")), str(route.get("hero_motif", "")))
     route.setdefault("intent_validation", {
+        "source": "fallback",
         "market_signal": market_signal,
         "dominant_intent": f"broad visual and cultural interest around {market_signal}",
         "ambiguity": "unknown",
@@ -213,6 +214,9 @@ def validate_intent(market_signal: str, llm=None) -> dict[str, Any]:
         "forbidden_leap": "do not invent a narrow specialist application that was not measured",
         "decision": "use-broad-signal",
         "confidence": 0.5,
+        # 0.5 is a neutral prior, not a measurement — callers must not read it as
+        # "probably ambiguous" when no model was available to judge.
+        "source": "fallback",
     }
     if llm is None or not getattr(llm, "available", False):
         return fallback
@@ -238,6 +242,7 @@ def validate_intent(market_signal: str, llm=None) -> dict[str, Any]:
         result["confidence"] = min(1.0, max(0.0, float(result["confidence"])))
     except (TypeError, ValueError):
         result["confidence"] = 0.5
+    result["source"] = "llm"
     return result
 
 

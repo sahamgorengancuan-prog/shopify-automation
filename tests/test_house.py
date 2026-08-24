@@ -125,7 +125,31 @@ def test_intent_validation_without_a_model_is_conservative():
     verdict = route.validate_intent("harbor", None)
     assert verdict["decision"] == "use-broad-signal"
     assert verdict["confidence"] == 0.5
+    assert verdict["source"] == "fallback", "0.5 is a neutral prior, not a measured ambiguity"
     assert verdict["safe_visual_territory"] == "harbor"
+
+
+def test_discovery_is_not_deadlocked_without_an_llm(settings):
+    """The neutral 0.5 prior must not read as 'too ambiguous' when nothing judged."""
+    from archivist.house.session import _discover_signal
+
+    signal, intent, evidence = _discover_signal(settings, None, log=lambda message: None)
+    assert signal
+    assert intent["source"] == "fallback"
+    assert evidence["chosen_by"] == "volume_first_plus_intent_validation"
+
+
+def test_a_judged_but_unconfident_signal_is_still_refused(settings, monkeypatch):
+    from archivist.house import session as session_mod
+
+    monkeypatch.setattr(
+        session_mod, "validate_intent",
+        lambda candidate, llm: {"decision": "use-broad-signal", "confidence": 0.2,
+                                "ambiguity": "high", "source": "llm"},
+    )
+    with pytest.raises(session_mod.HouseBlocked) as blocked:
+        session_mod._discover_signal(settings, object(), log=lambda message: None)
+    assert "intent gate" in str(blocked.value)
 
 
 def test_the_jury_falls_back_when_nothing_clears_the_bar():

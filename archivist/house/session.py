@@ -85,9 +85,13 @@ def _discover_signal(settings: Settings, llm, *, log: Log,
         intent = validate_intent(candidate, llm)
         log(
             f"  {candidate:<24} {intent['decision']:<20} confidence {float(intent['confidence']):.2f} "
-            f"| ambiguity {intent['ambiguity']}"
+            f"| ambiguity {intent['ambiguity']} | judged by {intent.get('source', 'fallback')}"
         )
-        if intent["decision"] == "use-broad-signal" and float(intent["confidence"]) >= MIN_INTENT_CONFIDENCE:
+        judged = intent.get("source") == "llm"
+        confident = float(intent["confidence"]) >= MIN_INTENT_CONFIDENCE
+        # A model that judged must be confident; with no model the deterministic
+        # verdict stands, otherwise discovery could never proceed without a key.
+        if intent["decision"] == "use-broad-signal" and (confident or not judged):
             evidence = {
                 "chosen_by": "volume_first_plus_intent_validation",
                 "relative_volume": report.selected_volume,
@@ -103,8 +107,9 @@ def _discover_signal(settings: Settings, llm, *, log: Log,
             return candidate, intent, evidence
 
     raise HouseBlocked(
-        "The highest-volume roots were all too ambiguous for a factual route. Nothing was generated "
-        "and no credit was used. Give a topic explicitly, or run discovery again later."
+        f"None of the {len(leaders)} highest-volume roots survived the intent gate "
+        f"({', '.join(leaders)}). Nothing was generated and no credit was used. Set a topic "
+        "explicitly, widen the geo, or run discovery again later."
     )
 
 
@@ -183,6 +188,13 @@ def run_session(
         log("previous collection style lock cleared" if cleared else "collection style lock starts clean")
 
     # 3 — the pipeline, narrowed by the route ------------------------------
+    # House mode runs 16 targeted queries and keeps at most five references, so
+    # mining a 60-candidate pool is wasted bandwidth (and, live, wasted requests).
+    settings.max_queries = min(settings.max_queries, 16)
+    settings.candidates_per_query = min(settings.candidates_per_query, 3)
+    settings.max_candidates = min(settings.max_candidates, 24)
+    settings.keep_references = min(settings.keep_references, 5)
+
     run_options = PipelineOptions(
         audience=route["buyer_identity"] or options.audience,
         garment=options.garment,
