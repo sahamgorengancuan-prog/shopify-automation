@@ -25,7 +25,32 @@ spending anything.
 |---|---|
 | `setup.bat` | finds `py -3.14`, else a 3.10+ `python`, else downloads the embeddable Python 3.14 into `%LOCALAPPDATA%\archivist`; creates the environment; installs dependencies; writes `env.cmd` |
 | `run_archivist.bat` | launches the Gradio control room (runs setup first if needed). Arguments pass through: `run_archivist.bat --port 8000 --scheduler` |
-| `run_pipeline.bat` | headless: `run_pipeline.bat "deep sea salvage" --no-generate`, `run_pipeline.bat --check`, `run_pipeline.bat --plan "north sea oil"` |
+| `run_pipeline.bat` | headless, no browser — the whole bot or any one stage |
+
+### Headless commands
+
+```bat
+run_pipeline.bat --auto                  discover AND design: the whole bot
+run_pipeline.bat --house                 the V9 house system end to end
+run_pipeline.bat --house --topic harbor  the house system on a chosen signal
+run_pipeline.bat --house --no-generate   blueprint, prompt contract and listing only
+run_pipeline.bat --volume                rank roots by relative search volume
+run_pipeline.bat --discover -n 8         research only
+run_pipeline.bat "deep sea salvage" --no-generate
+run_pipeline.bat --check                 connection self-test
+run_pipeline.bat --plan "north sea oil"  auto-plan a collection
+```
+
+Set `ARCHIVIST_OFFLINE=1` before any of them to rehearse the entire chain with
+no network and no spend. Offline runs cannot call the vision critic, so they are
+approved on the deterministic print proof alone and say so.
+
+### Colab / Jupyter
+
+`notebooks\archivist_pipeline.ipynb` is the one-run surface: open it, fill the
+parameter cell, run all. It clones the repository, loads keys from Colab Secrets,
+the environment or `.env` (presence only is ever shown, never a value), tests each
+service, then runs a single autonomous pipeline to a finished delivery.
 
 ## Keeping it running
 
