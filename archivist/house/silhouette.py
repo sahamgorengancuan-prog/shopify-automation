@@ -79,6 +79,42 @@ def _arm(box: Box, rng: random.Random, anchor: str) -> list[Point]:
     return _jitter(points, box, rng, 0.018)
 
 
+def _bollard(box: Box, rng: random.Random, anchor: str) -> list[Point]:
+    """A mooring bollard — the object the V10 failure was supposed to produce.
+
+    A cast body with a flared collar and a swollen head that a rope cannot slip
+    over. It is short, heavy and unmistakably a made fitting, which is exactly
+    what a generic blob failed to convey to the image model.
+    """
+    left, top, right, bottom = box
+    width, height = right - left, bottom - top
+    centre = left + width * rng.uniform(0.44, 0.56)
+    head = width * rng.uniform(0.30, 0.36)
+    neck = width * rng.uniform(0.20, 0.25)
+    waist = width * rng.uniform(0.24, 0.30)
+    base = width * rng.uniform(0.40, 0.47)
+    crown = top + height * rng.uniform(0.04, 0.10)
+    collar = top + height * rng.uniform(0.26, 0.33)
+    plinth = bottom - height * rng.uniform(0.08, 0.14)
+
+    return _jitter([
+        (centre - neck, crown + height * 0.06),
+        (centre - head * 0.86, crown),                     # domed cast head
+        (centre + head * 0.86, crown + height * 0.01),
+        (centre + neck, crown + height * 0.07),
+        (centre + neck * 0.82, collar - height * 0.04),
+        (centre + head, collar),                           # the collar a rope catches on
+        (centre + waist, collar + height * 0.06),
+        (centre + base * 0.92, plinth),
+        (centre + base, bottom),                           # bolted footing
+        (centre - base, bottom - height * 0.01),
+        (centre - base * 0.9, plinth - height * 0.02),
+        (centre - waist, collar + height * 0.05),
+        (centre - head, collar - height * 0.01),
+        (centre - neck * 0.84, collar - height * 0.05),
+    ], box, rng, 0.014)
+
+
 def _wall(box: Box, rng: random.Random, anchor: str) -> list[Point]:
     """A broad load-bearing slab — sea wall, dam face, revetment, bridge pier."""
     left, top, right, bottom = box
@@ -194,6 +230,12 @@ def _mass(box: Box, rng: random.Random, anchor: str) -> list[Point]:
 
 ARCHETYPES: tuple[Silhouette, ...] = (
     Silhouette(
+        "bollard", "mooring bollard",
+        "a short heavy cast mooring bollard with a swollen head, a rope collar and a bolted "
+        "footing — a made fitting, never a lump of concrete",
+        _bollard, "dense-relief",
+    ),
+    Silhouette(
         "arm", "angled structural arm",
         "an unmistakable angled arm reaching out from its root into open space, "
         "with a blunt fractured tip — never a scatter of loose blocks",
@@ -241,6 +283,8 @@ BY_KEY = {item.key: item for item in ARCHETYPES}
 
 # Subject vocabulary → archetype. Order matters: the first hit wins.
 KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("bollard", ("bollard", "mooring post", "mooring bitt", "bitt", "capstan", "dock cleat",
+                 "quay post", "tie-off post")),
     ("arm", ("breakwater", "jetty", "pier arm", "groyne", "mole", "spur", "boom", "cantilever",
              "crane arm", "gantry arm", "outfall", "arm")),
     ("hull", ("hull", "vessel", "ship", "boat", "buoy", "submersible", "bathysphere", "barge", "keel")),
@@ -274,6 +318,17 @@ def describe_for_prompt(silhouette: Silhouette, subject: str) -> str:
         f"The hero must read unmistakably as {subject} — {silhouette.prompt_note}. "
         "A viewer who has never read the brief must be able to name the object from the silhouette alone."
     )
+
+
+# ``mass`` is the shrug: it is what the vocabulary returns when it does not
+# recognise the subject. It can be previewed, so a route is still inspectable,
+# but it must never condition a paid generation — that is precisely the failure
+# where a bollard brief was drawn as a blob and the model was left to guess.
+UNSUPPORTED_FOR_LIVE_SPEND = ("mass",)
+
+
+def supports_live_spend(key: str) -> bool:
+    return str(key) not in UNSUPPORTED_FOR_LIVE_SPEND
 
 
 # Densest to sparsest, so a cap can be applied by index.

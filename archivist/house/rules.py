@@ -1,9 +1,11 @@
-"""ARCHIVIST house system (V9) — the rules every house design obeys.
+"""ARCHIVIST house system (V10.1) — the rules every house design obeys.
 
 The house system is one idea: *one real material fact, transformed once, placed
-off-centre, completed by one small printed sentence.* Everything in this package
-exists to make that provable rather than claimed — the blueprint is owned, the
-statement is typeset by code, and nothing ships unless the measured proof passes.
+where its function puts it.* Everything in this package exists to make that
+provable rather than claimed — the blueprint is owned, copy is optional and
+typeset by code when supplied, and nothing ships unless the measured proof
+passes. V10.1 adds the rule that gives the rest their teeth: every mark must
+have a physical reason, so decoration cannot stand in for authorship.
 """
 
 from __future__ import annotations
@@ -12,17 +14,18 @@ from typing import Any
 
 HOUSE_RULES: dict[str, Any] = {
     "system_name": "ASYMMETRIC ABSTRACT FIELD",
-    "version": "V9",
+    "version": "V10.1",
     "principle": (
         "One real material fact is transformed once into a displaced, irregular field. "
         "The empty garment is active, while one small printed sentence completes the thought."
     ),
     "art_occupancy": "the hero occupies 22-38% of the printable field without becoming a thin icon",
     "negative_space": "55-70% of the garment remains visually quiet",
-    "statement_location": "printed as deterministic microtype adjacent to the hero interruption",
+    "statement_location": "optional; when supplied, deterministic microtype beside the interruption",
+    "authorship": "every mark follows material, function, load, motion or wear — never decoration",
     "placement_explanation": "product description only",
     "default_paid_generations": 1,
-    "repair_policy": "technical failures are repaired locally; a second BFL call is an explicit controlled edit only",
+    "repair_policy": "technical failures are repaired locally; a second provider call is an explicit controlled edit only",
     "conditioning_policy": (
         "searched evidence informs the brief but is never sent to the image model; "
         "only an owned blueprint conditions pixels"
@@ -32,6 +35,10 @@ HOUSE_RULES: dict[str, Any] = {
         "border", "fake labels", "fictional institution", "fake declassification metadata",
         "pseudo-text", "generic vintage emblem", "literal trend headline", "stacked decorative blocks",
         "generic rubble", "unidentifiable debris",
+        # V10.1 §7/§13 — the AI tells that make an image look designed without being designed.
+        "arbitrary waves", "decorative swooshes", "floating fragments", "mysterious blobs",
+        "pseudo-diagrams", "fake measurement marks", "meaningless holes", "universal grunge",
+        "generic distress", "decorative filler",
     ],
 }
 
@@ -81,7 +88,7 @@ ACCEPTANCE = {
     "hero_envelope_range": (0.14, 0.42),
     "statement_contrast_min": 3.0,
     "statement_cap_height_mm_min": 2.4,
-    "statement_required": True,
+    "statement_required": False,   # V10.1 §11: copy is opt-in, empty is valid
     "best_of_bad_batch_is_forbidden": True,
 }
 
@@ -104,7 +111,13 @@ BANNED_STATEMENT_WORDS = {
 
 
 def statement_is_valid(statement: str) -> bool:
-    """4–8 calm words, no slogan vocabulary, no pronouns, no shouting."""
+    """Empty, or 4–8 calm words with no slogan vocabulary, pronouns or shouting.
+
+    V10.1 §11 makes copy opt-in: no statement is a valid finished state, so an
+    empty string passes. Supplied copy is still held to the full standard.
+    """
+    if not str(statement).strip():
+        return True
     words = str(statement).replace("—", " ").split()
     lowered = {word.lower().strip(".,;:!?\"'") for word in words}
     return (

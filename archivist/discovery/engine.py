@@ -57,9 +57,12 @@ Cancel = Callable[[], bool]
 
 # Anchors used to pull rising queries out of Google Trends. They are broad
 # enough to catch a wave early and neutral enough not to bias the aesthetic.
+# Broad, deliberately neutral category probes. Their job is to spread the net
+# across public interest, not to steer it toward the house's own taste — V10.1
+# §4.1: anchors diversify discovery, they are not preferred visual niches.
 DEFAULT_ANCHORS = [
-    "aesthetic", "subculture", "hobby", "vintage gear", "field guide",
-    "collecting", "archive", "workshop", "expedition", "restoration",
+    "hobby", "subculture", "craft", "sport", "music scene", "food culture",
+    "science", "history", "technology", "nature", "collecting", "community",
 ]
 
 

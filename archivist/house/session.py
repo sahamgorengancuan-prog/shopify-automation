@@ -1,6 +1,6 @@
 """One house session, end to end.
 
-    volume-first discovery → intent gate → creative route → pipeline (house mode)
+    public-signal discovery → intent gate → creative route → pipeline (house mode)
     → structural gate → one paid generation → local proof → delivery
 
 Nothing after the structural gate costs money until the gate passes, and nothing
@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..config import Settings
-from ..discovery import volume as volume_mod
 from ..discovery.engine import DiscoveryConfig, DiscoveryEngine
 from ..llm import LLM
 from ..models import RunResult, dump_json
@@ -64,23 +63,31 @@ class HouseResult:
 
 def _discover_signal(settings: Settings, llm, *, log: Log,
                      progress: Progress | None = None) -> tuple[str, dict[str, Any], dict[str, Any]]:
-    """Volume-first discovery, then an intent gate over the volume leaders."""
+    """Dynamic public-signal discovery, then the intent gate over the leaders.
+
+    V10.1 §2.1: autonomous discovery may not start from a house-preferred list.
+    The engine harvests what the public is actually searching and posting about;
+    the volume tool remains available as a diagnostic the caller drives, but it
+    no longer decides what this bot is interested in.
+    """
     config = DiscoveryConfig(
         geo=settings.trends_geo, timeframe=settings.trends_timeframe,
-        anchors=[], max_candidates=10_000, keep=1, use_llm=False, measure_social=True,
+        max_candidates=settings.discovery_candidates, keep=max(5, settings.discovery_keep),
+        use_llm=bool(llm), measure_social=True,
     )
-    engine = DiscoveryEngine(settings, config=config, llm=None, log=log)
-    report = volume_mod.discover(
-        engine, timeframe=settings.trends_timeframe, log=log,
+    engine = DiscoveryEngine(settings, config=config, llm=llm, log=log)
+    report = engine.discover(
         progress=(lambda fraction, message: progress(0.05 + fraction * 0.25, message)) if progress else None,
     )
-    report_path = volume_mod.write_report(report, settings.runs_dir)
 
-    leaders = [report.selected.topic if report.selected else ""]
-    leaders += [row.get("topic", "") for row in report.validated]
-    leaders = [topic for topic in dict.fromkeys(leaders) if topic][:5]
+    leaders = [row.topic for row in report.opportunities][:5]
+    if not leaders:
+        raise HouseBlocked(
+            "Public signal discovery returned no measurable candidate. Nothing was generated "
+            "and no credit was used. Check connectivity, widen the geo, or set a topic explicitly."
+        )
 
-    log("intent validation of the volume leaders")
+    log("intent validation of the discovered leaders")
     for candidate in leaders:
         intent = validate_intent(candidate, llm)
         log(
@@ -92,22 +99,21 @@ def _discover_signal(settings: Settings, llm, *, log: Log,
         # A model that judged must be confident; with no model the deterministic
         # verdict stands, otherwise discovery could never proceed without a key.
         if intent["decision"] == "use-broad-signal" and (confident or not judged):
+            measured = next((row for row in report.opportunities if row.topic == candidate), None)
             evidence = {
-                "chosen_by": "volume_first_plus_intent_validation",
-                "relative_volume": report.selected_volume,
-                "smart_score": report.selected_score,
-                "growth_3m": report.selected.growth_3m if report.selected else 0.0,
-                "social_heat": report.selected.social_heat if report.selected else 0.0,
-                "competition": report.selected.competition if report.selected else 0.0,
-                "sources": report.selected.sources if report.selected else [],
-                "measurement_coverage": report.coverage,
-                "report": str(report_path),
+                "chosen_by": "public_signal_discovery_plus_intent_validation",
+                "opportunity_score": getattr(measured, "score", 0.0),
+                "growth_3m": getattr(measured, "growth_3m", 0.0),
+                "social_heat": getattr(measured, "social_heat", 0.0),
+                "competition": getattr(measured, "competition", 0.0),
+                "sources": getattr(measured, "sources", []),
+                "report": str(settings.runs_dir / "_discovery" / "latest.json"),
                 "intent_validation": intent,
             }
             return candidate, intent, evidence
 
     raise HouseBlocked(
-        f"None of the {len(leaders)} highest-volume roots survived the intent gate "
+        f"None of the {len(leaders)} discovered leaders survived the intent gate "
         f"({', '.join(leaders)}). Nothing was generated and no credit was used. Set a topic "
         "explicitly, widen the geo, or run discovery again later."
     )

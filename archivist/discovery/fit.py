@@ -25,81 +25,59 @@ TARGET_PROFILE = (
     "The visual mass is deliberately off-centre; empty garment space carries meaning. No document aesthetic."
 )
 
-ANCHORS = [
-    "industrial archaeology", "obsolete technology", "field documentation",
-    "scientific instruments", "maritime infrastructure", "hydrographic survey",
-    "railway signal maintenance", "public works archive", "geological fieldwork",
-    "meteorological records", "analog communication", "museum cataloguing",
-    "archive conservation", "industrial typography", "expedition logbook",
-    "machine identification plates", "cartographic field notes", "port logistics",
-    "laboratory documentation", "material culture archive", "amateur radio logbook",
-    "underwater archaeology", "urban infrastructure", "technical manual archive",
-]
+# V10.1 §2.1: autonomous discovery may not start from a house-preferred list.
+# The volume tool still exists, but as a diagnostic the caller supplies roots to
+# — never as a seed pool that quietly decides what the bot is "interested in".
+VOLUME_ROOTS: list[str] = []
 
-CURATED_TOPICS = [
-    "weather balloon telemetry", "hydrographic survey instruments",
-    "railway signal maintenance", "industrial archaeology field notes",
-    "subsea cable mapping", "oceanographic specimen records",
-    "lighthouse lens mechanics", "seismic monitoring stations",
-    "geological core sampling", "analog telephone exchange schematics",
-    "harbor crane engineering", "tide gauge records",
-    "meteorological observation logs", "field recording equipment",
-    "bridge inspection markings", "cold storage logistics",
-    "shipyard riveting methods", "mine ventilation diagrams",
-    "public works identification plates", "cartographic error studies",
-    "botanical specimen cataloguing", "archive conservation tools",
-    "industrial control room notation", "photogrammetry field survey",
-    "deep sea salvage records", "observatory photographic plates",
-    "port cargo classification codes", "railway timetable typography",
-    "obsolete computing maintenance", "amateur radio signal logs",
-    "municipal water infrastructure", "aeronautical maintenance records",
-]
-
-# Broad one- and two-word roots, which is what Google Trends can actually compare.
-VOLUME_ROOTS = [
-    "archaeology", "cartography", "telemetry", "hydrography", "oceanography",
-    "meteorology", "seismology", "geology", "surveying", "infrastructure",
-    "shipyard", "lighthouse", "railway", "radar", "sonar", "navigation",
-    "aviation", "typography", "fieldwork", "observatory", "laboratory",
-    "microscopy", "conservation", "restoration", "foundry", "mining",
-    "machinery", "engineering", "schematics", "logistics", "harbor",
-    "canals", "tunnels", "bridges", "satellites", "robotics", "analog",
-    "fossils", "minerals", "specimens", "industrial archaeology",
-    "technical manuals", "field notes", "weather balloon", "tide gauge",
-    "public works", "maritime history", "analog computing", "signal tower",
-    "railway signals", "ocean mapping", "marine survey", "core sampling",
-    "amateur radio", "cold storage", "port logistics", "material culture",
-    "scientific instruments", "archival science", "machine plates",
-    "control room", "civil engineering", "urban systems", "deep sea",
-    "salvage diving", "geological survey", "botanical archive", "industrial design",
-]
-
-HOUSE_TERMS = [
-    "archive", "archival", "industrial", "infrastructure", "field", "survey",
-    "instrument", "scientific", "specimen", "catalog", "logbook", "record",
-    "telemetry", "signal", "railway", "maritime", "harbor", "port",
-    "subsea", "oceanographic", "geological", "meteorological", "observatory",
-    "cartographic", "photogrammetry", "archaeology", "conservation", "obsolete",
-    "analog", "machine", "maintenance", "engineering", "technical", "manual",
-    "laboratory", "public works", "material culture", "typography", "schematic",
-]
-
+# Things that are not designable subjects at all, whatever they score. This is
+# hygiene, not taste: a shopping query has no object behind it, a person is not
+# ours to print, and a bare aesthetic label names a mood rather than a thing.
 QUERY_NOISE = [
     "near me", "open today", "how to", "what is", "for sale", "amazon",
     "template", "maker", "quiz", "standings", "celebrity", "portrait",
+    "discount", "coupon", "cheap", "buy ", "reviews", "vs ", "net worth",
+    "lyrics", "showtimes", "score", "results", "login", "download",
+]
+
+# A designable topic points at something with a physical referent. These are
+# structural cues, deliberately not a taste profile: "society", "method" and
+# "species" are as welcome as "instrument".
+CONCRETE_CUES = [
+    "instrument", "machine", "structure", "tool", "vessel", "station", "system",
+    "material", "method", "technique", "craft", "species", "specimen", "record",
+    "archive", "survey", "process", "equipment", "device", "practice", "society",
+    "club", "guild", "workshop", "restoration", "collection", "fieldwork",
 ]
 
 
-def house_fit(topic: str, source: str = "") -> float:
-    """0–10: can the house actually make something out of this?"""
-    lowered = topic.lower()
+def topic_hygiene(topic: str, source: str = "") -> float:
+    """0–10: is this a designable subject at all?
+
+    V10.1 forbids the house from boosting its own preferred nouns here — that is
+    how a curated aesthetic quietly became "discovery". This asks only whether a
+    topic has a physical referent something could be drawn of. Whether anyone
+    wants to wear it is decided later, by the Market Truth gate, on evidence.
+    """
+    lowered = f" {str(topic).lower().strip()} "
     if any(noise in lowered for noise in QUERY_NOISE):
         return 0.0
-    matches = sum(1 for term in HOUSE_TERMS if term in lowered)
-    score = min(10.0, 4.0 + matches * 1.15)
-    if source in {"curated", "llm-targeted"}:
-        score = max(score, 8.2)
-    return round(score, 2)
+    words = lowered.split()
+    if not words or len(lowered.strip()) < 3:
+        return 0.0
+
+    score = 5.0
+    if any(cue in lowered for cue in CONCRETE_CUES):
+        score += 1.6
+    if 2 <= len(words) <= 5:
+        score += 0.8            # a phrase is usually more specific than a bare word
+    if any(character.isdigit() for character in lowered):
+        score -= 1.0            # model numbers and dates are usually news, not subjects
+    return round(max(0.0, min(10.0, score)), 2)
+
+
+# Kept so older callers keep working; the boost they relied on is gone.
+house_fit = topic_hygiene
 
 
 def adaptive_score(opportunity: TopicOpportunity, fit: float) -> float:

@@ -17,7 +17,7 @@ from typing import Any, Callable
 
 from . import board, brief, direction as direction_mod, gate, mining, prompts, queries as queries_mod
 from .apparel import prepare
-from .bfl import BFLClient, BFLError
+from .image_provider import GenerationRequest, ImageProviderError, for_settings
 from .config import Settings
 from .dna import build_dna
 from .llm import LLM
@@ -314,15 +314,7 @@ def run(
         # 12/13 — generation + print prep ---------------------------------
         keys = [k.upper() for k in options.generate_keys] or ([result.recommended] if result.recommended else [])
         if options.generate and settings.can_generate and keys:
-            client = BFLClient(
-                settings.bfl_api_key,
-                base_url=settings.bfl_base_url,
-                model=settings.bfl_model,
-                fallback_model=settings.bfl_fallback_model,
-                timeout=settings.http_timeout,
-                poll_interval=settings.poll_interval,
-                poll_timeout=settings.poll_timeout,
-            )
+            provider = for_settings(settings)
             context_paths = _context_paths(references, options.context_roles)
             for index, key in enumerate(keys):
                 concept = result.concept(key)
@@ -330,21 +322,19 @@ def run(
                     result.warnings.append(f"cannot generate unknown variant {key}")
                     continue
                 reporter.check_cancel()
-                reporter.say(f"generating {key} with {settings.bfl_model} ({len(context_paths)} context images)")
+                reporter.say(f"generating {key} with {provider.name} ({len(context_paths)} context images)")
                 artwork = run_dir / "artwork" / f"{key}.{settings.output_format}"
                 artwork.parent.mkdir(parents=True, exist_ok=True)
                 try:
-                    client.generate(
-                        concept.prompt,
-                        artwork,
-                        context_paths=context_paths,
+                    provider.generate(GenerationRequest(
+                        prompt=concept.prompt,
+                        destination=artwork,
+                        context_paths=[Path(path) for path in context_paths],
                         aspect_ratio=settings.aspect_ratio,
-                        output_format=settings.output_format,
                         seed=settings.seed or None,
-                        safety_tolerance=settings.safety_tolerance,
                         on_tick=reporter.within("generate"),
-                    )
-                except BFLError as exc:
+                    ))
+                except ImageProviderError as exc:
                     result.warnings.append(f"generation failed for {key}: {exc}")
                     reporter.say(f"generation failed for {key}: {exc}")
                     continue
@@ -357,7 +347,8 @@ def run(
                 reporter.say(f"print package ready for {key}: {concept.print_assets.get('print_size_in', '')}")
         elif options.generate and not settings.can_generate:
             result.warnings.append(
-                "generation skipped — no BFL_API_KEY (prompts and print settings are still written)"
+                f"generation skipped — no {settings.image_credential} "
+                "(prompts and print settings are still written)"
             )
             reporter.say("generation skipped: no BFL key configured")
 
@@ -536,30 +527,24 @@ def regenerate(
     if concept is None:
         raise ValueError(f"unknown variant {key}")
     if not settings.can_generate:
-        raise BFLError("BFL_API_KEY is not set")
+        raise ImageProviderError(f"{settings.image_credential} is not set")
 
     run_dir = Path(result.run_dir)
     reporter = _Reporter(progress, log, None, run_dir / "run.log")
     try:
-        client = BFLClient(
-            settings.bfl_api_key, base_url=settings.bfl_base_url, model=settings.bfl_model,
-            fallback_model=settings.bfl_fallback_model, timeout=settings.http_timeout,
-            poll_interval=settings.poll_interval, poll_timeout=settings.poll_timeout,
-        )
+        provider = for_settings(settings)
         stamp = datetime.now(timezone.utc).strftime("%H%M%S")
         artwork = run_dir / "artwork" / f"{key}-{stamp}.{settings.output_format}"
         artwork.parent.mkdir(parents=True, exist_ok=True)
         reporter.say(f"regenerating {key}")
-        client.generate(
-            concept.prompt,
-            artwork,
-            context_paths=_context_paths(result.references, options.context_roles),
+        provider.generate(GenerationRequest(
+            prompt=concept.prompt,
+            destination=artwork,
+            context_paths=[Path(path) for path in _context_paths(result.references, options.context_roles)],
             aspect_ratio=settings.aspect_ratio,
-            output_format=settings.output_format,
             seed=seed,
-            safety_tolerance=settings.safety_tolerance,
             on_tick=lambda fraction, message: reporter.say(message, fraction),
-        )
+        ))
         concept.artwork_path = str(artwork)
         concept.print_assets = prepare(
             artwork, run_dir / "print", key=f"{key}-{stamp}", garment=options.garment,

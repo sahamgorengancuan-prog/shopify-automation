@@ -137,7 +137,7 @@ def test_discovery_is_not_deadlocked_without_an_llm(settings):
     signal, intent, evidence = _discover_signal(settings, None, log=lambda message: None)
     assert signal
     assert intent["source"] == "fallback"
-    assert evidence["chosen_by"] == "volume_first_plus_intent_validation"
+    assert evidence["chosen_by"] == "public_signal_discovery_plus_intent_validation"
 
 
 def test_a_judged_but_unconfident_signal_is_still_refused(settings, monkeypatch):
@@ -545,7 +545,8 @@ def test_partial_measurements_are_refused_rather_than_ranked(settings, monkeypat
 
     with pytest.raises(volume_mod.VolumeDiscoveryError) as error:
         volume_mod.discover(engine, timeframe=settings.trends_timeframe,
-                            roots=volume_mod.VOLUME_ROOTS[:20], log=lambda message: None)
+                            roots=["harbor", "radar", "lighthouse", "railway", "foundry", "sonar"],
+                            log=lambda message: None)
     assert "throttled" in str(error.value) or "coverage" in str(error.value).lower()
 
 

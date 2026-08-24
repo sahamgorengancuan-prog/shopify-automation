@@ -146,12 +146,17 @@ def test_redacted_settings_never_expose_a_key(tmp_path, monkeypatch):
 
 
 def test_capability_report_explains_what_is_missing(tmp_path, monkeypatch):
-    for key in ("BFL_API_KEY", "PEXELS_API_KEY", "OPENAI_API_KEY"):
+    for key in ("HF_TOKEN", "BFL_API_KEY", "PEXELS_API_KEY", "OPENAI_API_KEY",
+                "ARCHIVIST_IMAGE_PROVIDER"):
         monkeypatch.delenv(key, raising=False)
     report = Settings.from_env(tmp_path).capability_report()
 
-    assert "BFL_API_KEY" in report["bfl"]
+    # The report names the credential the configured provider actually needs.
+    assert "HF_TOKEN" in report["image_provider"]
     assert report["duckduckgo"].startswith("ready")
+
+    monkeypatch.setenv("ARCHIVIST_IMAGE_PROVIDER", "bfl")
+    assert "BFL_API_KEY" in Settings.from_env(tmp_path).capability_report()["image_provider"]
 
 
 # --- creative assist (OpenAI) ------------------------------------------

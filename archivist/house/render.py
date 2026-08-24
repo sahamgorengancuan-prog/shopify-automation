@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..apparel import prepare
-from ..bfl import BFLClient
+from ..image_provider import GenerationRequest, for_settings
 from . import blueprint as blueprint_mod
 from . import critic as critic_mod
 from . import normalise as normalise_mod
@@ -318,11 +318,7 @@ def produce(result, concept, route: dict[str, Any], settings, options, render_op
     if reuse_source and not reuse_source.is_file():
         raise FileNotFoundError(f"reuse-raw file does not exist: {reuse_source}")
 
-    client = BFLClient(
-        settings.bfl_api_key, base_url=settings.bfl_base_url, model=settings.bfl_model,
-        fallback_model=settings.bfl_fallback_model, timeout=settings.http_timeout,
-        poll_interval=settings.poll_interval, poll_timeout=settings.poll_timeout,
-    )
+    provider = for_settings(settings)
 
     ranking_path = run_dir / "candidate_ranking.json"
     candidates: list[dict[str, Any]] = []
@@ -348,12 +344,13 @@ def produce(result, concept, route: dict[str, Any], settings, options, render_op
             api_call_used = False
             generation_type = "offline-synthetic"
         elif api_call_used:
-            log(f"paid generation {paid_call}/{max_calls}: {'controlled edit' if is_edit else 'blueprint-conditioned base'}")
-            client.generate(
-                prompt, raw, context_paths=context_paths, aspect_ratio=settings.aspect_ratio,
-                output_format="png", seed=seed, safety_tolerance=settings.safety_tolerance,
+            log(f"paid generation {paid_call}/{max_calls} via {provider.name}: "
+                f"{'controlled edit' if is_edit else 'blueprint-conditioned base'}")
+            provider.generate(GenerationRequest(
+                prompt=prompt, destination=raw, context_paths=[Path(path) for path in context_paths],
+                aspect_ratio=settings.aspect_ratio, seed=seed,
                 on_tick=lambda fraction, message: log(f"  {message}"),
-            )
+            ))
         else:
             log(f"reusing an existing raw frame, no paid call: {reuse_source}")
             if reuse_source.resolve() != raw.resolve():

@@ -90,9 +90,18 @@ class Settings:
     """Everything the pipeline needs to know about its environment."""
 
     # --- credentials -----------------------------------------------------
+    hf_token: str = ""
     bfl_api_key: str = ""
     pexels_api_key: str = ""
     openai_api_key: str = ""
+
+    # --- image generation -------------------------------------------------
+    # V10.1: the provider is a choice, not the architecture. BFL stays reachable
+    # for anyone with existing credit, but nothing above this line assumes it.
+    image_provider: str = "hf"            # hf | bfl
+    hf_inference_provider: str = "auto"
+    hf_image_model: str = "Qwen/Qwen-Image-Edit"
+    hf_text_image_model: str = "Qwen/Qwen-Image"
 
     # --- endpoints / models ---------------------------------------------
     bfl_base_url: str = "https://api.bfl.ai"
@@ -126,7 +135,8 @@ class Settings:
     house_allow_controlled_edit: bool = False
     house_allow_concept_retry: bool = False
     house_require_critic: bool = True
-    house_print_statement: bool = True
+    house_print_statement: bool = False   # V10.1 §11: typography is opt-in
+    market_truth_min_confidence: float = 0.70
     house_anchor: str = "auto"            # auto | upper-left | upper-right | low-left | low-right
     house_statement_override: str = ""
 
@@ -166,6 +176,11 @@ class Settings:
     def from_env(cls, root: Path | str = ".", **overrides) -> "Settings":
         load_env(root)
         settings = cls(
+            hf_token=os.environ.get("HF_TOKEN", "").strip(),
+            image_provider=os.environ.get("ARCHIVIST_IMAGE_PROVIDER", "hf").strip().lower() or "hf",
+            hf_inference_provider=os.environ.get("HF_INFERENCE_PROVIDER", "auto").strip() or "auto",
+            hf_image_model=os.environ.get("HF_IMAGE_MODEL", "Qwen/Qwen-Image-Edit").strip(),
+            hf_text_image_model=os.environ.get("HF_TEXT_IMAGE_MODEL", "Qwen/Qwen-Image").strip(),
             bfl_api_key=os.environ.get("BFL_API_KEY", "").strip(),
             pexels_api_key=os.environ.get("PEXELS_API_KEY", "").strip(),
             openai_api_key=os.environ.get("OPENAI_API_KEY", "").strip(),
@@ -194,7 +209,8 @@ class Settings:
             house_allow_controlled_edit=_bool("ARCHIVIST_ALLOW_CONTROLLED_EDIT", False),
             house_allow_concept_retry=_bool("ARCHIVIST_ALLOW_CONCEPT_RETRY", False),
             house_require_critic=_bool("ARCHIVIST_REQUIRE_CRITIC", True),
-            house_print_statement=_bool("ARCHIVIST_PRINT_STATEMENT", True),
+            market_truth_min_confidence=_float("ARCHIVIST_MARKET_TRUTH_MIN_CONFIDENCE", 0.70),
+            house_print_statement=_bool("ARCHIVIST_PRINT_STATEMENT", False),
             house_anchor=os.environ.get("ARCHIVIST_ANCHOR", "auto").strip() or "auto",
             house_statement_override=os.environ.get("ARCHIVIST_STATEMENT", "").strip(),
             max_queries=_int("ARCHIVIST_MAX_QUERIES", 24),
@@ -228,8 +244,17 @@ class Settings:
 
     # -- capability probes ------------------------------------------------
     @property
+    def image_credential(self) -> str:
+        """The key the configured provider actually needs."""
+        return "BFL_API_KEY" if self.image_provider == "bfl" else "HF_TOKEN"
+
+    @property
+    def has_image_credential(self) -> bool:
+        return bool(self.bfl_api_key if self.image_provider == "bfl" else self.hf_token)
+
+    @property
     def can_generate(self) -> bool:
-        return bool(self.bfl_api_key) and not self.offline
+        return self.has_image_credential and not self.offline
 
     @property
     def can_use_pexels(self) -> bool:
@@ -260,7 +285,7 @@ class Settings:
         return {
             "duckduckgo": "offline mode" if self.offline else "ready (no key required)",
             "pexels": state(bool(self.pexels_api_key), "PEXELS_API_KEY"),
-            "bfl": state(bool(self.bfl_api_key), "BFL_API_KEY"),
+            "image_provider": state(self.has_image_credential, self.image_credential),
             "llm_assist": state(bool(self.openai_api_key), "OPENAI_API_KEY"),
             "google_trends": "offline mode" if self.offline else "ready (no key required)",
             "reddit": (

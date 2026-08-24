@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import screening
-from .fit import TARGET_PROFILE, VOLUME_ROOTS, house_fit
+from .fit import TARGET_PROFILE, VOLUME_ROOTS, topic_hygiene
 from .models import Seed, TopicOpportunity
 from .scoring import competition_gap_score, growth_score
 
@@ -86,7 +86,18 @@ class VolumeReport:
 
 
 def normalise_roots(roots: list[str] | None = None) -> list[str]:
-    """Keep only screenable one- and two-word roots — what Trends can compare."""
+    """Keep only screenable one- and two-word roots — what Trends can compare.
+
+    V10.1: roots come from the caller. There is no house pool to fall back on,
+    because a fallback pool is exactly how a curated aesthetic would re-enter
+    autonomous discovery through the back door.
+    """
+    if not roots and not VOLUME_ROOTS:
+        raise VolumeDiscoveryError(
+            "volume comparison needs roots to compare. It is a diagnostic tool the caller "
+            "supplies terms to, not a discovery source — autonomous discovery harvests "
+            "public signals instead."
+        )
     out: list[str] = []
     seen: set[str] = set()
     for raw in roots or VOLUME_ROOTS:
@@ -147,7 +158,7 @@ def rank_by_volume(engine, roots: list[str], *, timeframe: str, log: Log,
         for term in batch:
             rows.append(VolumeRow(
                 topic=term, relative_volume=float(compared.get(term, 0.0)),
-                fit=house_fit(term, "curated"), measured=bool(compared.get(term, 0.0) or last_error is None),
+                fit=topic_hygiene(term), measured=bool(compared.get(term, 0.0) or last_error is None),
             ))
 
     rows.sort(key=lambda row: -row.relative_volume)

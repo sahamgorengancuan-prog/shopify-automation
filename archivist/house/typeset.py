@@ -140,7 +140,15 @@ def fit(image: Image.Image, statement: str, *, print_width_in: float = 12.0,
 
 def preflight(route: dict[str, Any], *, canvas: tuple[int, int] = (1248, 1664),
               print_width_in: float = 12.0) -> dict[str, Any]:
-    """Prove the runtime can typeset this statement before anything is paid for."""
+    """Prove the runtime can typeset this statement before anything is paid for.
+
+    An empty statement is a valid no-copy state, not a fault: V10.1 makes
+    typography opt-in, so preflight reports "nothing to typeset" and passes.
+    """
+    if not str(route.get("statement", "")).strip():
+        return {"font_path": str(font_path()), "font_size_source_px": 0, "cap_height_mm": 0.0,
+                "text_width_ratio": 0.0, "passed": True, "statement": "",
+                "reason": "no statement supplied — typography stage has nothing to print"}
     probe = Image.new("RGB", tuple(canvas), BACKGROUND)
     fitted = fit(probe, str(route["statement"]).upper(), print_width_in=print_width_in)
     return {
@@ -167,6 +175,12 @@ def apply(artwork_path: Path | str, route: dict[str, Any], output_path: Path | s
     if not enabled:
         image.save(output_path)
         return {"applied": False, "legible": False, "reason": "statement printing disabled",
+                "path": str(output_path)}
+
+    if not str(route.get("statement", "")).strip():
+        image.save(output_path)
+        return {"applied": False, "legible": False, "statement": "",
+                "reason": "no statement supplied — no copy is a valid finished state",
                 "path": str(output_path)}
 
     statement = str(route["statement"]).upper()
