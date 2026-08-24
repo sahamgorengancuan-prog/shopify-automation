@@ -316,6 +316,8 @@ def proof_lines(delivery) -> list[str]:
     ]
     if review:
         lines.append(f"{'vision critic':<20}: total {review.get('total', '—')} — {str(review.get('reason', ''))[:120]}")
+    elif not delivery.selected.get("vision_reviewed"):
+        lines.append(f"{'vision critic':<20}: not run — approved on the deterministic proof alone")
     return lines
 
 

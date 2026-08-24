@@ -389,9 +389,17 @@ def produce(result, concept, route: dict[str, Any], settings, options, render_op
         row["print_assets"] = assets
         row["measured"] = measured
 
+        # Offline mode is a no-spend rehearsal: no frame was paid for and no
+        # vision call is possible, so requiring the critic there would be a
+        # contradiction that no key can satisfy. The proof still has to pass,
+        # and the candidate is marked as never vision-reviewed.
+        critic_required = render_options.require_critic and not settings.offline
+        if render_options.require_critic and not critic_required:
+            log("offline mode: no vision critic — approval rests on the deterministic proof alone")
+
         if measured["hard_pass"]:
             review = critic_mod.review(
-                [row], route, settings, required=render_options.require_critic
+                [row], route, settings, required=critic_required
             ).get(1, {})
         else:
             reasons = "; ".join(proof_mod.explain(measured))
@@ -405,8 +413,9 @@ def produce(result, concept, route: dict[str, Any], settings, options, render_op
             else measured["heuristic_total"] * 10, 2
         )
         row["failure_class"] = proof_mod.failure_class(review, measured)
+        row["vision_reviewed"] = bool(review) and "total" in review
         row["passed"] = measured["hard_pass"] and (
-            critic_mod.passed(review) if render_options.require_critic
+            critic_mod.passed(review) if critic_required
             else (not review or critic_mod.passed(review))
         )
         candidates.append(row)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 import zipfile
 from pathlib import Path
 
@@ -472,6 +473,41 @@ def test_reuse_raw_recovers_without_paying(settings, tmp_path):
     )
     assert delivery.paid_calls == 0
     assert delivery.candidates[0]["generation_type"] in {"reused-base", "offline-synthetic"}
+
+
+def test_offline_approves_on_the_proof_and_says_the_critic_never_ran(settings, tmp_path):
+    """Offline is a no-spend rehearsal: requiring a vision call no key can make
+    would deadlock every offline run on every surface."""
+    prepared = run_session(
+        settings, PipelineOptions(garment="dark"), topic="harbor breakwater",
+        render_options=RenderOptions(require_critic=True, seed=5), generate=False,
+    )
+    delivery = produce(
+        prepared.result, prepared.result.concept("B"), prepared.route, settings,
+        PipelineOptions(garment="dark"), RenderOptions(require_critic=True, seed=5),
+    )
+    assert delivery.paid_calls == 0
+    assert delivery.selected["measured"]["hard_pass"], "the proof is never waived"
+    assert delivery.selected["vision_reviewed"] is False
+    ranking = json.loads(Path(delivery.ranking_path).read_text(encoding="utf-8"))
+    assert ranking["candidates"][-1]["vision_reviewed"] is False
+
+
+def test_a_live_run_without_a_key_still_refuses_to_skip_the_critic(settings, tmp_path):
+    """Only offline earns the exemption — a real run must not quietly lose it."""
+    live = replace(settings, offline=False, openai_api_key="")
+    prepared = run_session(
+        settings, PipelineOptions(garment="dark"), topic="harbor breakwater",
+        render_options=RenderOptions(require_critic=False, seed=6), generate=False,
+    )
+    spec, _ = blueprint.create(prepared.route, tmp_path / "bp.png", seed=6)
+    raw = synthesise_raw(prepared.route, spec, tmp_path / "raw.png", seed=6)
+    with pytest.raises(critic.CriticUnavailable):
+        produce(
+            prepared.result, prepared.result.concept("B"), prepared.route, live,
+            PipelineOptions(garment="dark"),
+            RenderOptions(require_critic=True, seed=6, reuse_raw=str(raw)),
+        )
 
 
 # --- volume-first discovery ---------------------------------------------
