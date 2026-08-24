@@ -94,7 +94,7 @@ ACCEPTANCE = {
 
 CRITICAL_VISION_SCORES = (
     "thumbnail_read", "artistic_mutation", "brand_ownership", "distinctiveness",
-    "wearability", "statement_integration", "artifact_control",
+    "wearability", "statement_integration", "artifact_control", "human_authorship",
 )
 
 CRITICAL_ROUTE_SCORES = (

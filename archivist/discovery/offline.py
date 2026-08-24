@@ -141,3 +141,33 @@ class OfflineSignals:
         )
         report.competition = round(min(100.0, 100.0 * listings / results_seen * 0.8), 1)
         return report
+
+
+def market_truth_rehearsal(topic: str):
+    """A Market Truth verdict for offline rehearsal — labelled as exactly that.
+
+    Offline mode exists so the whole chain can be exercised without a network or
+    a credit. That must not become a way to launder an unproven topic into a
+    passed audit, so the verdict says plainly where it came from: no rows were
+    fetched, no auditor read anything, and this is not evidence the topic is
+    trending or that anyone wants it.
+    """
+    from .truth import MarketTruth
+
+    subject = " ".join(str(topic).split()) or "rehearsal subject"
+    verdict = MarketTruth(topic=subject, passed=True, source="offline-rehearsal")
+    verdict.failure = ""
+    verdict.reason = (
+        "offline rehearsal: no public evidence was fetched and no auditor read anything. "
+        "This verdict exercises the chain; it proves nothing about the market."
+    )
+    verdict.exact_intent = f"rehearsal stand-in for '{subject}' — not an audited meaning"
+    verdict.ambiguity = "low"
+    verdict.buyer_identity = f"rehearsal audience for {subject}"
+    verdict.why_they_care = f"rehearsal: the {subject} carries the load and wear of its own use"
+    verdict.why_they_would_wear_it = "rehearsal: identification with a specific made object"
+    verdict.nameable_symbol = subject
+    verdict.confidence = 0.0
+    verdict.independent_domains = []
+    verdict.evidence = []
+    return verdict

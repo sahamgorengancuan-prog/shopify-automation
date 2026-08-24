@@ -43,12 +43,20 @@ def instructions(route: dict[str, Any]) -> str:
         "passed. A rectangular canvas edge, watermark, stock-photo residue, generic diagram, centred layout, "
         "or unreadable statement is a hard commercial failure. Generic rubble, debris or an unnameable mass "
         "fails subject_truth even when the composition is strong.\n"
+        "Refuse the marks that make an image look designed without being designed: arbitrary waves or "
+        "swooshes no water made, fragments floating to balance a composition, distress sprayed evenly "
+        "over a surface nothing wore, pseudo-diagram lines, fake measurement marks, meaningless holes, "
+        "and symbols that look significant but signify nothing. Each of those is an artifact_control "
+        "and human_authorship failure however polished the result looks.\n"
         f"Subject truth: {route['real_subject']} (silhouette must read as {silhouette}). "
-        f"True property: {route['source_property']}. Mutation: {route['mutation']}. "
-        f"Required visible statement: {route['statement']}.\n"
+        f"True property: {route['source_property']}. Mutation: {route['mutation']}.\n"
+        + (f"Required visible statement: {route['statement']}.\n" if str(route.get("statement", "")).strip()
+           else "This design carries no copy. That is intended — do not mark it down for the absence of "
+                "text, and score statement_integration 10.\n") +
         "Score 0-10 for asymmetric_tension, thumbnail_read, subject_truth, artistic_mutation, "
         "brand_ownership, distinctiveness, wearability, statement_integration, print_feasibility, "
-        f"artifact_control. Passed=true only when total >= {ACCEPTANCE['vision_total_min']:.0f} and "
+        "artifact_control, human_authorship. "
+        f"Passed=true only when total >= {ACCEPTANCE['vision_total_min']:.0f} and "
         f"{', '.join(CRITICAL_VISION_SCORES)} are all >= {ACCEPTANCE['critical_vision_scores_min']:.0f}. "
         'Return strict JSON as {"candidates":[{"index":1,"scores":{},"total":0,"passed":false,"reason":"",'
         '"failure_class":"technical|local-edit|concept","repair_priority":"one specific correction"}]}'

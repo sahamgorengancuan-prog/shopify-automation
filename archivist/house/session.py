@@ -39,6 +39,7 @@ class HouseResult:
     result: RunResult | None = None
     delivery: Delivery | None = None
     discovery: dict[str, Any] = field(default_factory=dict)
+    market_truth: Any = None
     files: dict[str, str] = field(default_factory=dict)
     rejected: str = ""          # path to the review package, when the proof said no
     warnings: list[str] = field(default_factory=list)
@@ -119,6 +120,39 @@ def _discover_signal(settings: Settings, llm, *, log: Log,
     )
 
 
+def _market_truth(market_signal: str, settings: Settings, llm, *, log: Log,
+                  trend_claim_waived: bool, user_topic: bool):
+    """Audit what the signal means, and write the audit where it can be read."""
+    from ..discovery import truth as truth_mod
+    from ..sources.duckduckgo import DuckDuckGoText
+
+    if settings.offline:
+        from ..discovery.offline import market_truth_rehearsal
+
+        verdict = market_truth_rehearsal(market_signal)
+    else:
+        verdict = truth_mod.audit(
+            market_signal,
+            text_source=DuckDuckGoText(user_agent=settings.user_agent, timeout=settings.http_timeout),
+            llm=llm, min_confidence=settings.market_truth_min_confidence,
+            trend_claim_waived=trend_claim_waived,
+        )
+
+    log(
+        f"market truth: {'passed' if verdict.passed else 'BLOCKED (' + verdict.failure + ')'} "
+        f"| intent {verdict.exact_intent or '—'} | symbol {verdict.nameable_symbol or '—'} "
+        f"| buyer {verdict.buyer_identity or '—'}"
+    )
+    if not verdict.passed:
+        log(f"  reason: {verdict.reason}")
+
+    truth_mod.write_audit(
+        verdict, settings.runs_dir,
+        name="user_topic_market_truth_latest.json" if user_topic else "market_truth_latest.json",
+    )
+    return verdict
+
+
 def run_session(
     settings: Settings | None = None,
     options: PipelineOptions | None = None,
@@ -165,10 +199,27 @@ def run_session(
         )
     log(f"market signal: {market_signal}")
 
+    # 1b — market truth ----------------------------------------------------
+    # A user-supplied topic waives the claim that it is *trending*. It does not
+    # waive what the topic means, who cares, or what could be drawn of it: those
+    # are what a paid generation would otherwise be guessing at (V10.1 §5).
+    progress(0.22, "auditing market truth")
+    market_truth = _market_truth(
+        market_signal, settings, llm, log=log,
+        trend_claim_waived=bool(topic.strip()), user_topic=bool(topic.strip()),
+    )
+    house_result.market_truth = market_truth
+    house_result.discovery["market_truth"] = market_truth.as_dict()
+    if not market_truth.passed:
+        house_result.warnings.append(
+            f"market truth did not pass ({market_truth.failure}): {market_truth.reason}"
+        )
+
     # 2 — the creative route ----------------------------------------------
     progress(0.32, "building the creative route")
     route = build_route(
-        market_signal, llm, intent=intent, anchor=settings.house_anchor, seed=settings.seed,
+        market_signal, llm, intent=intent, market_truth=market_truth,
+        anchor=settings.house_anchor, seed=settings.seed,
         statement_override=settings.house_statement_override,
     )
     house_result.route = route
