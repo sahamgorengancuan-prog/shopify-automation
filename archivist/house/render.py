@@ -166,7 +166,7 @@ def synthesise_raw(route: dict[str, Any], spec: dict[str, Any], destination: Pat
     from PIL import Image, ImageDraw, ImageFilter
 
     from . import silhouette as silhouette_mod
-    from .rules import hex_to_rgb
+    from .rules import hex_to_rgb, mode_geometry
 
     width, height = spec["canvas"]
     rng = _random.Random(f"house-offline|{route.get('market_signal')}|{seed}")
@@ -189,12 +189,111 @@ def synthesise_raw(route: dict[str, Any], spec: dict[str, Any], destination: Pat
 
     mask = Image.new("L", (width, height), 0)
     ImageDraw.Draw(mask).polygon(outline, fill=255)
+    mask = _fit_body(mask, box, spec, str(route.get("rendering_mode", "field")))
     ground = Image.new("RGB", (width, height), (9, 9, 10))
     image = Image.composite(image, ground, mask.filter(ImageFilter.GaussianBlur(1)))
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     image.save(destination)
     return destination
+
+
+def _printed_bounds(spec: dict[str, Any]) -> tuple[int, int, int, int]:
+    """What the print stage will trim to: hero, interruption and statement.
+
+    ``apparel.prepare`` trims to content before reporting ink coverage, so the
+    denominator of that percentage is this union — not the canvas and not the
+    hero box alone.
+    """
+    width, height = spec["canvas"]
+    left, top, right, bottom = (int(value) for value in spec["hero_bbox"])
+    points = [tuple(point) for point in spec.get("interruption", [])]
+    anchor = spec.get("statement_anchor") or [left, bottom]
+    lockup = str(spec.get("statement_lockup", "right-of-interruption"))
+    reach = int(width * 0.30)
+    statement = ((anchor[0] - reach, anchor[0]) if lockup == "left-of-interruption"
+                 else (anchor[0], anchor[0] + reach))
+    xs = [left, right, *(int(point[0]) for point in points), *statement]
+    ys = [top, bottom, *(int(point[1]) for point in points), int(anchor[1] + height * 0.03)]
+    return (max(0, min(xs)), max(0, min(ys)), min(width, max(xs)), min(height, max(ys)))
+
+
+# Measured across every archetype and mode: printed ink / geometric prediction.
+_PREDICTION_YIELD = 0.80
+
+
+def _fit_body(mask, box: tuple[int, int, int, int], spec: dict[str, Any], mode: str):
+    """Open or thicken the hero body until its coverage sits mid ink range.
+
+    Coverage is a property of the silhouette as much as the mode: a thin arm
+    under-inks a ``dense-relief`` route and a solid wall over-inks a ``linework``
+    one. Rather than assume a fixed retention per mode, this measures the mask
+    and converges on the band — banding the body open to shed ink, dilating it to
+    gain ink — so every archetype can satisfy every mode.
+    """
+    from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageStat
+
+    ink_low, ink_high = INK_RANGES.get(mode, INK_RANGES["field"])
+    left, top, right, bottom = (int(value) for value in box)
+    target_w, target_h = max(1, right - left), max(1, bottom - top)
+    print_left, print_top, print_right, print_bottom = _printed_bounds(spec)
+    printed_area = max(1, (print_right - print_left) * (print_bottom - print_top))
+    # Aim mid-band, corrected for the ink the finishing chain shaves off: keyed
+    # edges land on partial alpha and the coarse envelope drops speckle, so the
+    # printed percentage comes in near four fifths of the geometric prediction.
+    target_ink = (ink_low + ink_high) / 200.0 / _PREDICTION_YIELD
+
+    def predicted_ink(candidate) -> float:
+        """What the print proof will report for this body.
+
+        Normalisation dilates the mask, then fits the whole crop into the hero
+        box by its longer side — so a tall body loses area to the fit and its
+        coverage cannot be read off the mask alone.
+        """
+        dilated = candidate.filter(ImageFilter.MaxFilter(3))
+        crop = dilated.getbbox()
+        if not crop:
+            return 0.0
+        area = ImageStat.Stat(dilated).sum[0] / 255.0
+        scale = min(target_w / max(1, crop[2] - crop[0]), target_h / max(1, crop[3] - crop[1]))
+        return area * scale * scale / printed_area
+
+    current = predicted_ink(mask)
+    if current < target_ink:
+        # Kernel as a fraction of the body, so the result does not depend on the
+        # canvas size the blueprint happened to be drawn at.
+        grow = max(3, int(min(target_w, target_h) * 0.02) | 1)
+        thickened = mask
+        for _ in range(12):
+            if predicted_ink(thickened) >= target_ink:
+                break
+            thickened = thickened.filter(ImageFilter.MaxFilter(grow))
+        return thickened
+    if current <= target_ink * 1.05:
+        return mask
+
+    # Wide, few bands survive normalisation's dilation more predictably than many
+    # thin ones; the outer stroke keeps the silhouette nameable once opened.
+    period = max(24, int(target_h * 0.11))
+    trim = max(3, int(min(target_w, target_h) * 0.02) | 1)
+    stroke = ImageChops.difference(mask, mask.filter(ImageFilter.MinFilter(trim)))
+
+    def banded(keep: float):
+        bands = Image.new("L", mask.size, 0)
+        band_draw = ImageDraw.Draw(bands)
+        for y in range(top, bottom, period):
+            band_draw.rectangle((left, y, right, y + max(2, int(period * keep))), fill=255)
+        return ImageChops.lighter(ImageChops.multiply(mask, bands), stroke)
+
+    low, high, best = 0.05, 1.0, banded(0.5)
+    for _ in range(7):
+        middle = (low + high) / 2
+        best = banded(middle)
+        if predicted_ink(best) > target_ink:
+            high = middle
+        else:
+            low = middle
+    return best
 
 
 def produce(result, concept, route: dict[str, Any], settings, options, render_options: RenderOptions,

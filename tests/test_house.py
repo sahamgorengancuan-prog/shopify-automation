@@ -563,3 +563,81 @@ def test_house_mode_narrows_the_pipeline(settings):
     assert len(roles) == len(set(roles))
     assert all(reference.attributes.get("house_conditioning_allowed") is False
                for reference in run_result.references)
+
+
+# --- rendering modes must be physically reachable ------------------------
+def test_a_skeletal_body_cannot_be_asked_for_a_poured_field():
+    """A route may name any mode; the archetype decides what it can carry."""
+    assert silhouette.cap_mode(silhouette.BY_KEY["arm"], "dense-relief") == "linework"
+    assert silhouette.cap_mode(silhouette.BY_KEY["truss"], "dense-relief") == "field"
+    assert silhouette.cap_mode(silhouette.BY_KEY["wall"], "dense-relief") == "dense-relief"
+    assert silhouette.cap_mode(silhouette.BY_KEY["wall"], "linework") == "linework"
+    assert silhouette.cap_mode(silhouette.BY_KEY["mass"], "nonsense") == "field"
+
+
+def test_the_route_never_ships_a_mode_its_silhouette_cannot_reach():
+    built = route.fallback_route("harbor breakwater", seed=1)
+    shape = silhouette.BY_KEY[built["silhouette"]["key"]]
+    assert built["rendering_mode"] == silhouette.cap_mode(shape, built["rendering_mode"])
+
+
+def test_the_envelope_grows_with_the_rendering_mode():
+    """A dense mode inside a linework envelope could never reach its ink range."""
+    boxes = {
+        mode_name: blueprint.hero_box((1000, 1000), "upper-left", mode_name)
+        for mode_name in ("linework", "field", "dense-relief")
+    }
+    areas = {key: (box[2] - box[0]) * (box[3] - box[1]) / 1_000_000 for key, box in boxes.items()}
+    assert areas["linework"] < areas["field"] < areas["dense-relief"]
+    low, high = rules.ACCEPTANCE["hero_envelope_range"]
+    assert all(low <= area <= high for area in areas.values())
+
+
+@pytest.mark.parametrize("shape_key", sorted(silhouette.BY_KEY))
+def test_every_archetype_reaches_its_own_ink_range(tmp_path, shape_key):
+    """The proof must be satisfiable: geometry, mode and body have to agree.
+
+    Before this held, a route could pass every gate, spend a paid generation and
+    then fail ``mode_aware_ink`` on arithmetic alone.
+    """
+    from archivist import apparel
+
+    shape = silhouette.BY_KEY[shape_key]
+    for requested in ("linework", "dense-relief"):
+        rendering_mode = silhouette.cap_mode(shape, requested)
+        built = dict(route.fallback_route("harbor breakwater", anchor="low-right", seed=2))
+        built["rendering_mode"] = rendering_mode
+        built["silhouette"] = {"key": shape.key, "label": shape.label}
+
+        work = tmp_path / f"{shape_key}-{requested}"
+        work.mkdir()
+        spec, _ = blueprint.create(built, work / "bp.png", size=(624, 832))
+        raw = synthesise_raw(built, spec, work / "raw.png", seed=1)
+        normalise.to_blueprint(raw, built, spec, work / "norm.png")
+        statement = typeset.apply(work / "norm.png", built, work / "print.png",
+                                  blueprint_spec=spec, print_width_in=12.0)
+        assets = apparel.prepare(work / "print.png", work, garment="dark", build_mockup=False)
+        measured = proof.measure(work / "norm.png", assets["print"], assets, statement, built)
+
+        low, high = rules.INK_RANGES[rendering_mode]
+        assert low <= measured["ink_coverage"] <= high, (
+            f"{shape_key} in {rendering_mode} measured {measured['ink_coverage']}%"
+        )
+        assert measured["hard_pass"], proof.explain(measured)
+
+
+def test_asymmetry_is_measured_independently_of_coverage():
+    """Sparse linework is not less asymmetric than a solid slab of the same shape."""
+    from PIL import Image, ImageDraw
+
+    def score(band_gap: int) -> float:
+        canvas = Image.new("RGB", (600, 800), rules.BACKGROUND)
+        draw = ImageDraw.Draw(canvas)
+        draw.polygon([(90, 120), (330, 150), (300, 620), (120, 560)], fill=(240, 240, 235))
+        if band_gap:
+            for y in range(120, 640, band_gap):
+                draw.rectangle((80, y, 340, y + band_gap // 2), fill=rules.BACKGROUND)
+        return proof._asymmetry(normalise.foreground_mask(canvas))[0]
+
+    solid, opened = score(0), score(40)
+    assert opened >= solid * 0.8, f"opening the body dropped asymmetry {solid} -> {opened}"

@@ -16,6 +16,29 @@ from .normalise import foreground_mask
 from .rules import ACCEPTANCE, INK_RANGES
 
 
+def _asymmetry(mask: Image.Image) -> tuple[float, float, float]:
+    """Shape asymmetry, horizontal mass shift and mass centre.
+
+    The mirror difference is measured against the artwork's own mass, so a
+    sparse linework body scores its shape the same way a poured field does. Raw
+    mirror difference scales with coverage, which would fail every low-ink
+    rendering mode on arithmetic rather than on composition.
+    """
+    small = mask.resize((96, 128), Image.Resampling.BILINEAR)
+    pixels = list(small.tobytes())  # 8-bit mask, one byte per pixel
+    total = sum(pixels) or 1
+    x_moment = sum((index % small.width) * value for index, value in enumerate(pixels)) / total
+    centre_x = x_moment / max(1, small.width - 1)
+    mass_shift = abs(centre_x - 0.5)
+
+    mirrored = small.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+    mirror_difference = ImageStat.Stat(ImageChops.difference(small, mirrored)).mean[0] / 255.0
+    mass = ImageStat.Stat(small).mean[0] / 255.0
+    mirror_ratio = min(1.0, mirror_difference / max(0.02, 2.0 * mass))
+    asymmetry = round(min(10.0, mirror_ratio * 8.0 + mass_shift * 22.0), 2)
+    return asymmetry, mass_shift, centre_x
+
+
 def measure(normalised_path: Path | str, print_path: Path | str, print_assets: dict[str, Any],
             statement_spec: dict[str, Any], route: dict[str, Any]) -> dict[str, Any]:
     with Image.open(normalised_path) as source:
@@ -28,15 +51,7 @@ def measure(normalised_path: Path | str, print_path: Path | str, print_assets: d
     bbox_height = (bbox[3] - bbox[1]) / max(1, height)
     envelope_ratio = bbox_width * bbox_height
 
-    small = mask.resize((96, 128), Image.Resampling.BILINEAR)
-    pixels = list(small.tobytes())  # 8-bit mask, one byte per pixel
-    total = sum(pixels) or 1
-    x_moment = sum((index % small.width) * value for index, value in enumerate(pixels)) / total
-    centre_x = x_moment / max(1, small.width - 1)
-    mass_shift = abs(centre_x - 0.5)
-    mirrored = small.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
-    mirror_difference = ImageStat.Stat(ImageChops.difference(small, mirrored)).mean[0] / 255.0
-    asymmetry = round(min(10.0, mirror_difference * 24.0 + mass_shift * 22.0), 2)
+    asymmetry, mass_shift, centre_x = _asymmetry(mask)
 
     edge = max(2, round(min(width, height) * 0.015))
     edge_mask = Image.new("L", mask.size, 0)

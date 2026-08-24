@@ -33,6 +33,12 @@ class Silhouette:
     label: str
     prompt_note: str
     build: Callable[[Box, random.Random, str], list[Point]]
+    # The densest rendering mode this body can honestly carry. Coverage is
+    # bounded by the silhouette: within the house envelope only a broad body
+    # reaches dense-relief ink, and a skeletal arm cannot even reach a field's
+    # without ceasing to be an arm. The route is capped rather than the proof
+    # being relaxed, so an unreachable mode never costs a paid generation.
+    max_mode: str = "dense-relief"
 
     def outline(self, box: Box, rng: random.Random, anchor: str = "upper-left") -> list[tuple[int, int]]:
         return [(int(x), int(y)) for x, y in self.build(box, rng, anchor)]
@@ -191,7 +197,7 @@ ARCHETYPES: tuple[Silhouette, ...] = (
         "arm", "angled structural arm",
         "an unmistakable angled arm reaching out from its root into open space, "
         "with a blunt fractured tip — never a scatter of loose blocks",
-        _arm,
+        _arm, "linework",
     ),
     Silhouette(
         "wall", "broad load-bearing wall",
@@ -202,7 +208,7 @@ ARCHETYPES: tuple[Silhouette, ...] = (
     Silhouette(
         "tower", "tapered vertical structure",
         "a tapered vertical structure with a readable head, shaft and base",
-        _tower,
+        _tower, "field",
     ),
     Silhouette(
         "plate", "instrument plate or disc",
@@ -222,12 +228,12 @@ ARCHETYPES: tuple[Silhouette, ...] = (
     Silhouette(
         "truss", "angular structural frame",
         "an angular load-path frame whose members meet at real joints",
-        _truss,
+        _truss, "field",
     ),
     Silhouette(
         "mass", "irregular material body",
         "one coherent material body with a decisive outer contour, never scattered fragments",
-        _mass,
+        _mass, "field",
     ),
 )
 
@@ -268,3 +274,16 @@ def describe_for_prompt(silhouette: Silhouette, subject: str) -> str:
         f"The hero must read unmistakably as {subject} — {silhouette.prompt_note}. "
         "A viewer who has never read the brief must be able to name the object from the silhouette alone."
     )
+
+
+# Densest to sparsest, so a cap can be applied by index.
+MODE_DENSITY: tuple[str, ...] = ("linework", "field", "dense-relief")
+
+
+def cap_mode(shape: Silhouette, mode: str | None) -> str:
+    """The requested rendering mode, reduced to what this body can carry."""
+    requested = str(mode) if mode in MODE_DENSITY else "field"
+    ceiling = shape.max_mode if shape.max_mode in MODE_DENSITY else "dense-relief"
+    if MODE_DENSITY.index(requested) <= MODE_DENSITY.index(ceiling):
+        return requested
+    return ceiling

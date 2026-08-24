@@ -24,6 +24,7 @@ from .rules import (
     ANCHORS,
     CRITICAL_ROUTE_SCORES,
     HOUSE_RULES,
+    INK_RANGES,
     MUTATIONS,
     RENDERING_MODES,
     STATEMENT_LOCKUPS,
@@ -188,11 +189,14 @@ def _finalise(route: dict[str, Any], market_signal: str, anchor: str) -> dict[st
         "decision": "use-broad-signal",
         "confidence": 0.5,
     })
+    mode = silhouette_mod.cap_mode(shape, route.get("rendering_mode"))
+    ink_low, ink_high = INK_RANGES.get(mode, INK_RANGES["field"])
     route.update({
         "market_signal": market_signal,
+        "rendering_mode": mode,
         "asymmetry_anchor": anchor,
         "negative_space_target": "55-70%",
-        "art_occupancy_target": "22-38%",
+        "art_occupancy_target": f"{ink_low:.0f}-{min(72.0, ink_high):.0f}%",
         "statement_location": "printed microtype",
         "statement_lockup": "right-of-interruption" if "left" in anchor else "left-of-interruption",
         "placement_explanation_location": "product description only",

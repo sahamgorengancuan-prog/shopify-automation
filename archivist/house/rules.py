@@ -53,6 +53,26 @@ INK_RANGES: dict[str, tuple[float, float]] = {
     "dense-relief": (30.0, 62.0),
 }
 
+# Geometry per rendering mode. Ink coverage is roughly (hero envelope) x (how
+# solidly the hero fills its own bounding box), so a single fixed envelope makes
+# the denser modes arithmetically unreachable — a paid generation would always
+# come back and fail ``mode_aware_ink``. Each mode therefore gets an envelope
+# whose achievable coverage brackets its ink range, kept inside ACCEPTANCE's
+# hero_envelope_range and above the minimum bbox width/height.
+# ``retain`` is how much of the solid body survives as open banding, which is
+# what separates drawn linework from a poured field at the same silhouette.
+MODE_GEOMETRY: dict[str, dict[str, float]] = {
+    "linework": {"box_w": 0.48, "box_h": 0.46, "retain": 0.45},
+    "field": {"box_w": 0.54, "box_h": 0.52, "retain": 1.0},
+    "dense-relief": {"box_w": 0.57, "box_h": 0.55, "retain": 1.0},
+}
+
+
+def mode_geometry(mode: str | None) -> dict[str, float]:
+    """Blueprint geometry for a rendering mode, defaulting to ``field``."""
+    return MODE_GEOMETRY.get(str(mode), MODE_GEOMETRY["field"])
+
+
 # Acceptance contract — the numbers a candidate must hit to become a final.
 ACCEPTANCE = {
     "vision_total_min": 82.0,

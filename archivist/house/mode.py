@@ -17,7 +17,7 @@ from typing import Any, Sequence
 from ..models import Cluster, Reference, Role, SearchQuery
 from ..roles import _contribution
 from ..trends import keywords
-from .rules import HOUSE_RULES, MUTATIONS, statement_is_valid
+from .rules import HOUSE_RULES, INK_RANGES, MUTATIONS, mode_geometry, statement_is_valid
 
 # Marketplaces and agencies whose pixels must never inform a design.
 STOCK_MARKERS = (
@@ -266,6 +266,11 @@ class HouseMode:
                include_text: bool = False) -> str:
         route = self.route
         shape = route.get("silhouette") or {}
+        # Occupancy is stated in the same terms the deterministic proof measures,
+        # so the model is asked for the coverage its rendering mode is judged on.
+        ink_low, ink_high = INK_RANGES.get(str(route.get("rendering_mode")), INK_RANGES["field"])
+        geometry = mode_geometry(route.get("rendering_mode"))
+        occupancy_low, occupancy_high = ink_low, min(72.0, ink_high)
         contract = {
             "priority": (
                 "Transform image 1, the owned black-and-white blueprint, into the finished artwork while "
@@ -297,12 +302,17 @@ class HouseMode:
             "composition": {
                 "placement": route["placement_logic"],
                 "visual_centre_shift": "6-14% away from canvas centre",
-                "hero_occupancy": "22-38% of printable field",
-                "quiet_space": "55-70%",
+                "hero_occupancy": f"{occupancy_low:.0f}-{occupancy_high:.0f}% of printable field",
+                "quiet_space": f"{100 - occupancy_high:.0f}-{100 - occupancy_low:.0f}%",
                 "balance": "intentional asymmetric tension with no mirrored or distant counterweight",
                 "reserved_statement_zone": route["statement_lockup"],
             },
             "rendering_mode": route["rendering_mode"],
+            "ink_coverage_target": (
+                f"{ink_low:.0f}-{ink_high:.0f}% opaque ink measured inside the artwork's own bounds"
+                + ("; an open drawn body, not a poured slab" if geometry["retain"] < 0.99
+                   else "; a substantial filled body, not an outline")
+            ),
             "material": f"{route['visual_treatment']}; material tooth exists only inside the hero silhouette",
             "colour": {
                 "hero_ink_1": route["palette"][0], "hero_ink_2": route["palette"][1],

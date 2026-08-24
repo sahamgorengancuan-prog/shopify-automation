@@ -16,7 +16,7 @@ from typing import Any
 from PIL import Image, ImageDraw
 
 from . import silhouette as silhouette_mod
-from .rules import BACKGROUND
+from .rules import BACKGROUND, mode_geometry
 
 INK = (235, 235, 229)
 
@@ -29,11 +29,17 @@ CENTRES: dict[str, tuple[float, float]] = {
 }
 
 
-def hero_box(size: tuple[int, int], anchor: str) -> tuple[int, int, int, int]:
-    """The rectangle the hero must live inside, kept off the canvas edges."""
+def hero_box(size: tuple[int, int], anchor: str,
+             rendering_mode: str | None = None) -> tuple[int, int, int, int]:
+    """The rectangle the hero must live inside, kept off the canvas edges.
+
+    The rectangle is mode-aware: a ``dense-relief`` route cannot reach its ink
+    range inside a ``linework`` envelope, so the envelope grows with the mode.
+    """
     width, height = size
     centre_x, centre_y = CENTRES.get(anchor, (0.34, 0.60))
-    hero_w, hero_h = int(width * 0.48), int(height * 0.46)
+    geometry = mode_geometry(rendering_mode)
+    hero_w, hero_h = int(width * geometry["box_w"]), int(height * geometry["box_h"])
     left = int(width * centre_x - hero_w / 2)
     top = int(height * centre_y - hero_h / 2)
     left = max(int(width * 0.05), min(left, width - hero_w - int(width * 0.05)))
@@ -75,7 +81,8 @@ def create(route: dict[str, Any], output_path: Path | str, *, size: tuple[int, i
     """Draw the blueprint and write its spec beside it."""
     width, height = size
     anchor = str(route.get("asymmetry_anchor", "upper-left"))
-    box = hero_box(size, anchor)
+    mode = str(route.get("rendering_mode", "field"))
+    box = hero_box(size, anchor, mode)
     left, top, right, bottom = box
 
     rng = random.Random(f"house-blueprint|{route.get('market_signal')}|{route.get('mutation')}|{seed}")
@@ -118,6 +125,8 @@ def create(route: dict[str, Any], output_path: Path | str, *, size: tuple[int, i
         "anchor": anchor,
         "silhouette": {"key": shape.key, "label": shape.label},
         "mutation": route.get("mutation"),
+        "rendering_mode": mode,
+        "body_retention": mode_geometry(mode)["retain"],
         "hero_bbox": [left, top, right, bottom],
         "hero_envelope_ratio": round(((right - left) * (bottom - top)) / (width * height), 4),
         "interruption": [[int(start_x), int(start_y)], [int(end_x), int(end_y)]],
