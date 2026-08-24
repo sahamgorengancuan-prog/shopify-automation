@@ -30,8 +30,10 @@ DECORATIVE_TELLS: dict[str, tuple[str, ...]] = {
                            "suspended particles", "debris field", "loose fragments", "confetti"),
     "mystery_blob": ("blob", "amorphous", "abstract shape", "organic form", "mysterious form",
                      "undefined mass", "nondescript"),
-    "generic_distress": ("grunge", "distressed texture", "vintage distress", "weathered look",
-                         "worn effect", "aged overlay", "halftone overlay"),
+    # "weathered" names an appearance, never the thing that did the weathering.
+    # A real route says salt, traffic, abrasion or load instead.
+    "generic_distress": ("grunge", "distressed texture", "vintage distress", "weathered",
+                         "worn effect", "aged overlay", "halftone overlay", "patina overlay"),
     "pseudo_symbol": ("cryptic symbol", "mysterious symbol", "arcane", "rune", "sigil",
                       "esoteric mark", "occult"),
     "pseudo_diagram": ("technical diagram", "blueprint lines", "schematic overlay", "fake data",
@@ -43,7 +45,7 @@ DECORATIVE_TELLS: dict[str, tuple[str, ...]] = {
 PHYSICAL_CAUSES = (
     "load", "stress", "tension", "compression", "wear", "abrasion", "corrosion", "rust",
     "fatigue", "impact", "erosion", "tide", "current", "weight", "friction", "heat",
-    "pressure", "vibration", "salt", "weather", "traffic", "use", "grip", "torque",
+    "pressure", "vibration", "salt", "traffic", "use", "grip", "torque",
     "bearing", "mooring", "anchor", "support", "carry", "hold", "rope", "chain",
     "bolt", "weld", "joint", "seam", "hinge", "thread", "cast", "forged", "machined",
 )
