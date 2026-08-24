@@ -51,8 +51,13 @@ Unzip `dist/archivist-windows-py314.zip`, double-click `run_archivist.bat`. It
 finds `py -3.14`, or any Python 3.10+, or downloads the embeddable Python 3.14 —
 nothing to install first.
 
-**Notebook** — `notebooks/archivist_pipeline.ipynb` runs the same code stage by
-stage, with the control room embedded in the last cell.
+**Colab / Jupyter** — `notebooks/archivist_pipeline.ipynb` is the one-run
+surface: open it, fill the parameter cell, and run all. It clones this repository,
+loads keys from Colab Secrets, the environment or a `.env` (presence only is ever
+shown — never a value), tests each service, then runs a single autonomous
+pipeline to a finished delivery. No server, no UI to launch.
+`notebooks/pipeline_stages.ipynb` is the slower companion that walks the same
+pipeline one stage at a time, with the control room in its last cell.
 
 Then open **③ Discovery** and press **Run autopilot now**. That is the whole
 product: it finds a topic and designs it.
@@ -172,6 +177,14 @@ pixels on ten axes and must clear 82/100 with no critical score below 8.
 Failure classes decide whether money can help at all — `technical` is repaired
 locally for free, `local-edit` can be fixed by a controlled edit, and `concept`
 means the subject was wrong, so the route is rebuilt before any second call.
+
+Every check has to be *reachable*, or the proof would only be a way to lose money
+after the fact. Ink coverage is bounded by geometry: the hero envelope decides how
+much of the printed field the body can cover at all, so the envelope grows with
+the rendering mode, and each silhouette declares the densest mode it can honestly
+carry — a skeletal arm renders as linework, only a broad body reaches
+dense-relief. A route naming a mode its own silhouette cannot reach is capped
+before the blueprint is drawn, never discovered after a generation is paid for.
 
 ### Volume-first discovery
 
