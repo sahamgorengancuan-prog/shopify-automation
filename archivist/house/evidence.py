@@ -92,11 +92,18 @@ def audit(route: dict[str, Any], *, references: Sequence[Any] = (), market_truth
     claim_tokens = tokens(claim) - tokens(result.subject)
     haystacks = _reference_text(references)
     if market_truth is not None:
+        # A route carries its truth as a dict; callers may hand over the object.
+        def field(name: str, default=""):
+            if isinstance(market_truth, dict):
+                return market_truth.get(name, default)
+            return getattr(market_truth, name, default)
+
         haystacks.extend([
-            str(getattr(market_truth, "exact_intent", "")),
-            str(getattr(market_truth, "why_they_care", "")),
+            str(field("exact_intent")),
+            str(field("why_they_care")),
+            str(field("why_they_would_wear_it")),
             *[str(row.get("title", "")) + " " + str(row.get("snippet", ""))
-              for row in (getattr(market_truth, "evidence", None) or [])],
+              for row in (field("evidence", []) or [])],
         ])
 
     for text in haystacks:

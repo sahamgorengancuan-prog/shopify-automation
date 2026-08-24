@@ -12,6 +12,7 @@ from PIL import Image
 
 from archivist.discovery import volume as volume_mod
 from archivist.discovery.engine import DiscoveryConfig, DiscoveryEngine
+from archivist.discovery.truth import MarketTruth
 from archivist.house import blueprint, critic, mode, normalise, proof, route, rules, silhouette, typeset
 from archivist.house.render import RenderOptions, HouseRejected, produce, synthesise_raw
 from archivist.house.session import run_session
@@ -77,19 +78,37 @@ def test_outlines_stay_inside_their_box_and_are_not_degenerate():
 
 
 # --- route ---------------------------------------------------------------
-def test_every_fallback_family_is_complete_and_nameable():
+def test_a_route_without_market_truth_is_a_marked_preview():
+    """V10.1 §6: no curated family may supply a subject nobody evidenced."""
     for signal in ("harbor", "deep sea", "radar", "railway", "sourdough hydration"):
         built = route.fallback_route(signal, seed=1)
         for field in route.REQUIRED_FIELDS:
             assert str(built[field]).strip(), f"{signal} is missing {field}"
+        assert built["evidence_source"] == "preview-only"
+        assert built["real_subject"] == signal, "a preview may not invent a narrower object"
+        assert "unverified" in built["buyer_identity"]
         assert built["mutation"] in rules.MUTATIONS
         assert rules.valid_palette(built["palette"])
         assert rules.statement_is_valid(built["statement"])
+        assert built["statement"] == "", "V10.1 §11: copy is opt-in, so a route ships without it"
         assert built["conditioning_policy"] == "blueprint-only"
         assert built["silhouette"]["key"] in silhouette.BY_KEY
-        # A vague subject is what fails the visual critic, so no family may ship one.
-        assert not any(word in built["real_subject"].lower()
-                       for word in ("rubble", "debris", "fragments", "assorted"))
+
+
+def test_a_verified_route_is_built_from_the_evidenced_symbol():
+    verdict = MarketTruth(topic="harbor", passed=True)
+    verdict.nameable_symbol = "mooring bollard"
+    verdict.buyer_identity = "harbour history society members"
+    verdict.why_they_care = "they record dock furniture before it is scrapped"
+
+    built = route.fallback_route("harbor", market_truth=verdict, seed=1)
+    assert built["real_subject"] == "mooring bollard"
+    assert built["evidence_source"] == "market_truth"
+    assert built["buyer_identity"] == "harbour history society members"
+    assert built["silhouette"]["key"] == "bollard", "the verified subject picks its own geometry"
+    assert built["market_truth"]["passed"] is True, "the route carries its receipts"
+    assert not any(word in built["real_subject"].lower()
+                   for word in ("rubble", "debris", "fragments", "assorted"))
 
 
 def test_a_broken_model_route_falls_back_instead_of_shipping():
@@ -109,7 +128,7 @@ def test_a_broken_model_route_falls_back_instead_of_shipping():
     assert partial["real_subject"] == "a cast bronze mooring bollard"   # the good field survives
     assert partial["mutation"] == fallback["mutation"]
     assert partial["palette"] == fallback["palette"]
-    assert partial["statement"] == fallback["statement"]
+    assert partial["statement"] == fallback["statement"] == ""
     assert partial["rendering_mode"] in rules.RENDERING_MODES
 
 
@@ -193,8 +212,35 @@ def test_anchor_moves_the_mass():
 
 
 # --- typography ----------------------------------------------------------
-def test_statement_preflight_proves_the_runtime_before_spending():
+def _with_copy(signal: str = "harbor", statement: str = "The line stays. The tide doesn't."):
+    """Copy is opt-in, so a typography test has to opt in."""
+    built = route.fallback_route(signal, seed=0)
+    return route.normalise_route(None, built, statement_override=statement)
+
+
+def test_no_copy_is_a_finished_state_not_an_error(tmp_path):
+    """V10.1 §11 / regression 7: no obligatory AI poetry."""
     built = route.fallback_route("harbor", seed=0)
+    assert built["statement"] == ""
+
+    report = typeset.preflight(built, canvas=(1248, 1664), print_width_in=12.0)
+    assert report["passed"], "an empty statement must not fail preflight"
+    assert report["cap_height_mm"] == 0.0
+
+    canvas = Image.new("RGB", (1248, 1664), rules.BACKGROUND)
+    source = tmp_path / "art.png"
+    canvas.save(source)
+    applied = typeset.apply(source, built, tmp_path / "composed.png",
+                            blueprint_spec={"canvas": [1248, 1664], "statement_anchor": [500, 900],
+                                            "statement_lockup": "right-of-interruption"},
+                            print_width_in=12.0)
+    assert applied["applied"] is False
+    assert "no copy is a valid finished state" in applied["reason"]
+    assert (tmp_path / "composed.png").is_file(), "the artwork still ships, just without copy"
+
+
+def test_statement_preflight_proves_the_runtime_before_spending():
+    built = _with_copy()
     report = typeset.preflight(built, canvas=(1248, 1664), print_width_in=12.0)
     assert report["passed"]
     assert report["cap_height_mm"] >= typeset.MIN_CAP_HEIGHT_MM
@@ -202,7 +248,7 @@ def test_statement_preflight_proves_the_runtime_before_spending():
 
 
 def test_statement_is_typeset_legibly_and_cropped(tmp_path):
-    built = route.fallback_route("harbor", seed=0)
+    built = _with_copy()
     canvas = Image.new("RGB", (1248, 1664), rules.BACKGROUND)
     source = tmp_path / "art.png"
     canvas.save(source)
@@ -344,8 +390,17 @@ def test_house_queries_hunt_the_named_subject():
     assert {query.cluster for query in queries} >= {Cluster.LITERAL, Cluster.COMPOSITION, Cluster.TEXTURE}
 
 
+def _verified(signal: str, symbol: str) -> MarketTruth:
+    verdict = MarketTruth(topic=signal, passed=True)
+    verdict.nameable_symbol = symbol
+    verdict.buyer_identity = "harbour history society members"
+    verdict.why_they_care = "they record dock furniture before it is scrapped"
+    return verdict
+
+
 def test_the_structural_gate_blocks_a_vague_subject():
-    built = route.fallback_route("harbor", seed=0)
+    built = route.fallback_route("harbor", market_truth=_verified("harbor", "tidal range gauge plates"),
+                                 seed=0)
     references = [_reference(Cluster.LITERAL), _reference(Cluster.ARCHIVAL)]
     house = mode.HouseMode(built)
     for reference in references:
@@ -375,9 +430,11 @@ def test_the_prompt_contract_demands_a_recognisable_subject():
 
 # --- render --------------------------------------------------------------
 def test_offline_render_produces_an_approved_delivery(settings):
+    settings = replace(settings, house_statement_override="The line stays. The tide doesn't.")
     result = run_session(
         settings, PipelineOptions(garment="dark"), topic="harbor breakwater",
-        render_options=RenderOptions(require_critic=False, seed=1), generate=True,
+        render_options=RenderOptions(require_critic=False, seed=1, print_statement=True),
+        generate=True,
     )
     assert result.approved, result.warnings
     delivery = result.delivery
@@ -394,7 +451,9 @@ def test_offline_render_produces_an_approved_delivery(settings):
     assert delivery.selected["statement_spec"]["cap_height_mm"] >= 2.4
 
     ranking = json.loads(delivery.ranking_path.read_text(encoding="utf-8"))
-    assert ranking["status"] == "approved"
+    assert ranking["status"] == "offline-rehearsal-approved", \
+        "an offline rehearsal must never be recorded as market approval"
+    assert ranking["framework"] == "ARCHIVIST V10.1"
     assert ranking["efficiency_contract"]["searched_reference_pixels_used"] is False
 
     placement = json.loads((final / "placement_spec.json").read_text(encoding="utf-8"))
@@ -500,11 +559,14 @@ def test_a_live_run_without_a_key_still_refuses_to_skip_the_critic(settings, tmp
         settings, PipelineOptions(garment="dark"), topic="harbor breakwater",
         render_options=RenderOptions(require_critic=False, seed=6), generate=False,
     )
-    spec, _ = blueprint.create(prepared.route, tmp_path / "bp.png", seed=6)
-    raw = synthesise_raw(prepared.route, spec, tmp_path / "raw.png", seed=6)
+    # Build the route the way a live run would, so the critic is what is tested.
+    verified = _verified("harbor breakwater", "tidal range gauge plates")
+    route_with_truth = route.fallback_route("harbor breakwater", market_truth=verified, seed=6)
+    spec, _ = blueprint.create(route_with_truth, tmp_path / "bp.png", seed=6)
+    raw = synthesise_raw(route_with_truth, spec, tmp_path / "raw.png", seed=6)
     with pytest.raises(critic.CriticUnavailable):
         produce(
-            prepared.result, prepared.result.concept("B"), prepared.route, live,
+            prepared.result, prepared.result.concept("B"), route_with_truth, live,
             PipelineOptions(garment="dark"),
             RenderOptions(require_critic=True, seed=6, reuse_raw=str(raw)),
         )

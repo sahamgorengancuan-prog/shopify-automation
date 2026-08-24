@@ -32,9 +32,11 @@ from .rules import (
     valid_palette,
 )
 
+# What a route must say to be a design at all. V10.1 §11 leaves ``statement`` out
+# on purpose: copy is opt-in, and a route with no copy is finished, not partial.
 REQUIRED_FIELDS = (
     "real_subject", "source_property", "artistic_topic", "product_title", "mutation",
-    "metaphor", "hero_motif", "signature_interruption", "placement_logic", "statement",
+    "metaphor", "hero_motif", "signature_interruption", "placement_logic",
 )
 
 
@@ -44,135 +46,79 @@ def choose_anchor(market_signal: str, *, anchor: str = "auto", seed: int = 0) ->
     return random.Random(f"house-anchor|{market_signal}|{seed}").choice(list(ANCHORS))
 
 
-# --- fallbacks -----------------------------------------------------------
-# Each family is a genuinely designed route, not filler: when the model is
-# unavailable or writes something weak, this is what ships.
-_FAMILIES: tuple[tuple[tuple[str, ...], dict[str, Any]], ...] = (
-    (
-        ("harbor", "harbour", "tide", "port", "coast", "sea level", "quay", "dock"),
-        {
-            "real_subject": "tidal range gauge plates fixed to harbor walls",
-            "source_property": "the marker stays fixed while the water level repeatedly crosses it",
-            "buyer_identity": "design-literate wearers drawn to maritime infrastructure and restrained abstraction",
-            "artistic_topic": "Measured Drift",
-            "product_title": "Measured Drift",
-            "mutation": "erode",
-            "cultural_tension": "a fixed system tries to describe an environment that never stays still",
-            "metaphor": "one interrupted measuring edge becomes the shoreline between permanence and change",
-            "hero_motif": "a broad chipped enamel gauge plate cut by one displaced tidal edge",
-            "signature_interruption": "one short horizontal datum stops before it meets the eroded field",
-            "visual_treatment": "flat relief print with chipped enamel tooth confined inside a decisive silhouette",
-            "palette": ["#F2EFE8", "#3F5667", "#A65A3A"],
-            "statement": "The line stays. The tide doesn't.",
-            "statement_meaning": "The fixed gauge and the moving tide describe the difference between reference and change.",
-            "rendering_mode": "field",
-            "product_hook": "A displaced tidal field where the fixed line matters because everything around it moves.",
-        },
-    ),
-    (
-        ("deep sea", "ocean", "bathym", "trench", "marine", "subsea", "seafloor"),
-        {
-            "real_subject": "abyssal trench bathymetry and layered seafloor strata",
-            "source_property": "depth is assigned by measurement while the terrain continues beyond a readable edge",
-            "buyer_identity": "design-literate wearers drawn to ocean science and unresolved terrain",
-            "artistic_topic": "Hadal Scar",
-            "product_title": "Hadal Scar",
-            "mutation": "incise",
-            "cultural_tension": "measurement promises an ending where the terrain only continues",
-            "metaphor": "the deepest contour becomes an unresolved wound rather than a chart",
-            "hero_motif": "one layered geological strata body broken by a narrow descending incision",
-            "signature_interruption": "the incision stops before resolving the lower edge",
-            "visual_treatment": "hand-cut geological relief with restrained dry ink and a clean outer field",
-            "palette": ["#E6E0D4", "#777875", "#A64232"],
-            "statement": "The bottom is only a measurement.",
-            "statement_meaning": "Depth is a human reading, not proof that the terrain has ended.",
-            "rendering_mode": "field",
-            "product_hook": "A displaced geological field about the limit of measuring what lies below.",
-        },
-    ),
-    (
-        ("signal", "radio", "radar", "telemetry", "analog", "analogue", "satellite", "sonar",
-         "navigation", "lighthouse", "beacon", "lens", "optics", "observatory", "antenna"),
-        {
-            "real_subject": "a steel signal mast carrying interrupted receiver traces",
-            "source_property": "a transmission can arrive without producing a complete reception",
-            "buyer_identity": "analogue technology collectors who prefer quiet conceptual graphics",
-            "artistic_topic": "Unreceived",
-            "product_title": "Unreceived",
-            "mutation": "attenuate",
-            "cultural_tension": "arrival is measurable while understanding is not guaranteed",
-            "metaphor": "one signal body loses its terminal fragment across an active gap",
-            "hero_motif": "a tapered signal mast split once below its detached terminal head",
-            "signature_interruption": "one precise receiving gap remains visibly unresolved",
-            "visual_treatment": "coarse relief waveform with a selective phosphor-like dry edge",
-            "palette": ["#DDDCCF", "#66746D", "#B3573E"],
-            "statement": "Arrival never guaranteed reception.",
-            "statement_meaning": "Physical arrival and actual understanding are different events.",
-            "rendering_mode": "linework",
-            "product_hook": "An interrupted signal field about the distance between arrival and reception.",
-        },
-    ),
-    (
-        ("industrial", "machine", "machinery", "engineering", "infrastructure", "archaeology",
-         "foundry", "shipyard", "railway", "bridge", "tunnel", "mining"),
-        {
-            "real_subject": "a riveted bridge truss carrying visible structural stress traces",
-            "source_property": "the material keeps its deformation after the original load has gone",
-            "buyer_identity": "people who read machines as material history rather than nostalgia",
-            "artistic_topic": "Residual Load",
-            "product_title": "Residual Load",
-            "mutation": "fracture",
-            "cultural_tension": "function ends while force remains legible in the material",
-            "metaphor": "one compressed body retains the profile of an absent force",
-            "hero_motif": "a riveted truss frame fractured along one displaced stress seam",
-            "signature_interruption": "one stress seam exits the frame and stops in empty space",
-            "visual_treatment": "mineral rubbing and oxidised relief edge inside a strong flat silhouette",
-            "palette": ["#E5DED0", "#6F716E", "#A34B35"],
-            "statement": "Force leaves. The shape remains.",
-            "statement_meaning": "The material outlasts the event that changed it.",
-            "rendering_mode": "dense-relief",
-            "product_hook": "A displaced structural field about force remaining visible after the work ends.",
-        },
-    ),
-)
+# --- routes ---------------------------------------------------------------
+# V10.1 §6: the topic-family shortcut is gone. A route no longer starts from a
+# house-owned idea keyed off a word in the topic — that is how `harbor` became a
+# mooring bollard nobody had evidence for. It starts from the symbol Market
+# Truth actually verified, or, in preview-only mode, from the literal topic
+# clearly marked as unverified.
+
+def _palette(market_signal: str, seed: int) -> list[str]:
+    """Three inks, chosen deterministically so a signal keeps its identity."""
+    choices = (
+        ["#E5DED0", "#6F716E", "#A34B35"],
+        ["#DDDCCF", "#66746D", "#B3573E"],
+        ["#E4DED1", "#737572", "#A74332"],
+        ["#E2DCCC", "#5F6B70", "#9C5330"],
+    )
+    return list(random.Random(f"house-palette|{market_signal}|{seed}").choice(choices))
 
 
-def fallback_route(market_signal: str, *, anchor: str = "auto", seed: int = 0) -> dict[str, Any]:
-    lowered = market_signal.lower()
+def fallback_route(market_signal: str, *, market_truth: Any = None, anchor: str = "auto",
+                   seed: int = 0) -> dict[str, Any]:
+    """The route the system builds when no model writes one.
+
+    With a passed Market Truth this is a real design: the subject is the symbol
+    that was verified, the property comes from what the evidence said the
+    community cares about, and the buyer is the one that was proved. Without it,
+    the route is explicitly a *preview* of the literal topic — inspectable, and
+    barred from live spend by the subject audit.
+    """
     chosen_anchor = choose_anchor(market_signal, anchor=anchor, seed=seed)
+    symbol = str(getattr(market_truth, "nameable_symbol", "") or "").strip()
+    verified = bool(getattr(market_truth, "passed", False)) and bool(symbol)
+    subject = symbol if verified else market_signal
 
-    route: dict[str, Any] | None = None
-    for terms, body in _FAMILIES:
-        if any(term in lowered for term in terms):
-            route = dict(body)
-            break
-    if route is None:
-        # The generic family still has to name a real object: a vague subject is
-        # exactly what fails the visual critic's subject_truth check.
-        route = {
-            "real_subject": f"a bolted steel inspection plate on a {market_signal} installation",
-            "source_property": "the plate keeps the impact marks of every inspection it has survived",
-            "buyer_identity": "design-literate wearers who value research-driven abstraction",
-            "artistic_topic": "Displaced Evidence",
-            "product_title": "Displaced Evidence",
-            "mutation": "displace",
-            "cultural_tension": "an absent cause still determines how the remaining material is read",
-            "metaphor": "one material body shifts because the missing portion still carries visual weight",
-            "hero_motif": "a bolted steel plate, its outline broken once along the load edge",
-            "signature_interruption": "one line exits the body and remains deliberately unfinished",
-            "visual_treatment": "hand-cut relief with material grain confined inside a decisive contour",
-            "palette": ["#E4DED1", "#737572", "#A74332"],
-            "statement": "Missing weight still shifts the field.",
-            "statement_meaning": "Absence continues to influence the balance of what remains.",
-            "rendering_mode": "field",
-            "product_hook": "An asymmetric material field in which absence remains physically active.",
-        }
+    if verified:
+        prop = (str(getattr(market_truth, "why_they_care", "")).strip()
+                or str(getattr(market_truth, "exact_intent", "")).strip())
+        buyer = str(getattr(market_truth, "buyer_identity", "")).strip()
+    else:
+        # Stated, not blank: a preview route must read as unverified rather than
+        # as a route whose evidence merely went missing. The subject audit turns
+        # this into a refusal if anyone tries to spend on it.
+        prop = "unverified — no market evidence was audited for this preview"
+        buyer = "unverified — no buyer community was evidenced"
+
+    route: dict[str, Any] = {
+        "real_subject": subject,
+        "source_property": prop,
+        "buyer_identity": buyer,
+        "artistic_topic": subject.title(),
+        "product_title": subject.title(),
+        "mutation": random.Random(f"house-mutation|{subject}|{seed}").choice(list(MUTATIONS)),
+        "cultural_tension": (
+            f"what {subject} is for, and what it looks like once it has done the job"
+        ),
+        "metaphor": f"one {subject} carries the mark of the work it was made to take",
+        "hero_motif": f"a single {subject}, its outline broken once along the line that carries load",
+        "signature_interruption": "one edge stops where the material gave way, and is not resolved",
+        "visual_treatment": "flat relief print with material tooth confined inside a decisive contour",
+        "palette": _palette(market_signal, seed),
+        "statement": "",                 # V10.1 §11: copy is opt-in
+        "statement_meaning": "",
+        "rendering_mode": "field",
+        "product_hook": f"An asymmetric material study of a {subject}.",
+        "evidence_source": "market_truth" if verified else "preview-only",
+    }
 
     route["placement_logic"] = (
         f"the material body enters from {chosen_anchor}; its interruption points into the opposing "
         "empty field without creating a counterweight"
     )
     _finalise(route, market_signal, chosen_anchor)
+    if market_truth is not None:
+        route["market_truth"] = market_truth.as_dict() if hasattr(market_truth, "as_dict") else dict(market_truth)
     return route
 
 
@@ -299,13 +245,18 @@ def build_route(
     llm=None,
     *,
     intent: dict[str, Any] | None = None,
+    market_truth: Any = None,
     anchor: str = "auto",
     seed: int = 0,
     statement_override: str = "",
     critic_note: str = "",
 ) -> dict[str, Any]:
-    """Produce the creative bridge for one market signal."""
-    fallback = fallback_route(market_signal, anchor=anchor, seed=seed)
+    """Produce the creative bridge for one market signal.
+
+    ``market_truth`` is what the route is allowed to be about. Without it the
+    route is a preview: inspectable, and blocked from live spend downstream.
+    """
+    fallback = fallback_route(market_signal, market_truth=market_truth, anchor=anchor, seed=seed)
     if statement_override.strip():
         fallback = normalise_route(None, fallback, statement_override=statement_override)
     validated = intent or validate_intent(market_signal, llm)
@@ -321,10 +272,22 @@ def build_route(
         "Choose a subject whose silhouette proves itself without a caption.\n"
         if critic_note else ""
     )
+    verified_symbol = str(getattr(market_truth, "nameable_symbol", "") or "").strip()
+    evidence_brief = ""
+    if getattr(market_truth, "passed", False):
+        evidence_brief = (
+            f"VERIFIED SUBJECT (do not substitute): {verified_symbol}\n"
+            f"Verified buyer: {getattr(market_truth, 'buyer_identity', '')}\n"
+            f"Why they care: {getattr(market_truth, 'why_they_care', '')}\n"
+            f"Why they would wear it: {getattr(market_truth, 'why_they_would_wear_it', '')}\n"
+            "Every route must be about that subject. Narrowing to a different object is the "
+            "semantic leap this system exists to prevent.\n"
+        )
     routes_payload = llm._json_call(
         "You are the creative director of ARCHIVIST, an independent premium art-apparel label.\n"
         f"Market demand signal: {market_signal}\n"
         f"Validated intent: {json.dumps(validated, ensure_ascii=False)}\n"
+        + evidence_brief +
         "House system: ASYMMETRIC ABSTRACT FIELD.\n" + repair +
         "\nCreate exactly three genuinely different creative routes. Every route must follow this sequence:\n"
         "1. EVIDENCE — one real, photographable subject inside the validated visual territory. The source "

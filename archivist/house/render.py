@@ -28,8 +28,10 @@ from typing import Any, Callable
 
 from ..apparel import prepare
 from ..image_provider import GenerationRequest, for_settings
+from . import artdirector
 from . import blueprint as blueprint_mod
 from . import critic as critic_mod
+from . import evidence as evidence_mod
 from . import normalise as normalise_mod
 from . import proof as proof_mod
 from . import typeset
@@ -67,6 +69,10 @@ class Delivery:
     paid_calls: int = 0
 
 
+class SpendBlocked(RuntimeError):
+    """Live generation was refused before a credit was spent, and says why."""
+
+
 class HouseRejected(RuntimeError):
     """Raised instead of packaging a design the proof did not accept."""
 
@@ -81,7 +87,7 @@ def _write_ranking(path: Path, route: dict[str, Any], candidates: list[dict[str,
                    options: RenderOptions, *, selected: dict[str, Any] | None = None,
                    status: str = "reviewing", spec: dict[str, Any] | None = None) -> None:
     path.write_text(json.dumps({
-        "framework": "ARCHIVIST V9",
+        "framework": "ARCHIVIST V10.1",
         "house_system": HOUSE_RULES,
         "efficiency_contract": {
             "paid_generation_budget": options.max_calls(),
@@ -296,6 +302,50 @@ def _fit_body(mask, box: tuple[int, int, int, int], spec: dict[str, Any], mode: 
     return best
 
 
+def _spend_firewall(route: dict[str, Any], settings, references, *, live: bool,
+                    log: Log, llm=None) -> dict[str, Any]:
+    """Everything that must be true before a provider is allowed to charge.
+
+    V10.1 §14/§19. Each check is deliberately a refusal rather than a default:
+    absence of a truth object is a failure, not permission. A refusal costs
+    another research cycle; a wrong pass costs money and ships apparel about
+    something nobody meant.
+    """
+    truth = route.get("market_truth")
+    audit: dict[str, Any] = {
+        "live_generation": bool(live),
+        "market_truth": truth,
+        "conditioning_policy": "owned blueprint only; searched pixels are research-only",
+    }
+
+    if live:
+        if not isinstance(truth, dict) or not truth.get("passed"):
+            raise SpendBlocked(
+                "live generation requires a passed Market Truth on the route. "
+                f"Found: {(truth or {}).get('failure') or 'no market truth object at all'}. "
+                "Nothing was generated and no credit was used."
+            )
+
+    subject = evidence_mod.audit(route, references=references or [],
+                                 market_truth=truth, live=live)
+    audit["subject_audit"] = subject.as_dict()
+    if live and not subject.passed:
+        raise SpendBlocked(f"subject audit blocked live generation: {subject.reason}")
+
+    authorship = artdirector.review(route, llm)
+    audit["art_director_audit"] = authorship.as_dict()
+    if live and not authorship.passed:
+        raise SpendBlocked(f"the authorship gate blocked live generation: {authorship.reason}")
+
+    log(
+        "pre-inference gates: "
+        f"market truth {'passed' if (truth or {}).get('passed') else 'absent'}, "
+        f"subject {'ok' if subject.passed else 'unproven'}, "
+        f"authorship {'ok' if authorship.passed else 'unproven'}"
+    )
+    return audit
+
+
 def produce(result, concept, route: dict[str, Any], settings, options, render_options: RenderOptions,
             *, log: Log | None = None, llm=None) -> Delivery:
     """Generate, prove and package. Raises HouseRejected rather than shipping a maybe."""
@@ -319,6 +369,20 @@ def produce(result, concept, route: dict[str, Any], settings, options, render_op
         raise FileNotFoundError(f"reuse-raw file does not exist: {reuse_source}")
 
     provider = for_settings(settings)
+
+    # Nothing below this line is free, so the gates run here rather than earlier:
+    # by now the blueprint and typography have proved the run is even possible.
+    preinference = _spend_firewall(
+        route, settings, getattr(result, "references", []),
+        live=not settings.offline, log=log, llm=llm,
+    )
+    preinference["blueprint"] = {
+        "silhouette": spec.get("silhouette"), "anchor": spec.get("anchor"),
+        "rendering_mode": spec.get("rendering_mode"), "owned_conditioning_asset": True,
+        "searched_reference_pixels_used": False,
+    }
+    (run_dir / "preinference_audit.json").write_text(
+        json.dumps(preinference, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
 
     ranking_path = run_dir / "candidate_ranking.json"
     candidates: list[dict[str, Any]] = []
@@ -415,15 +479,23 @@ def produce(result, concept, route: dict[str, Any], settings, options, render_op
             critic_mod.passed(review) if critic_required
             else (not review or critic_mod.passed(review))
         )
+        # Offline acceptance is a rehearsal, not market approval, and the manifest
+        # has to say which one it was (V10.1 §17).
+        if row["passed"]:
+            row["approval"] = "offline-rehearsal-approved" if settings.offline else "approved"
         candidates.append(row)
         _write_ranking(ranking_path, route, candidates, render_options,
                        selected=row if row["passed"] else None,
-                       status="approved" if row["passed"] else "reviewed", spec=spec)
+                       status=row.get("approval", "reviewed") if row["passed"] else "reviewed",
+                       spec=spec)
 
         if row["passed"]:
             selected = row
             used = sum(1 for candidate in candidates if candidate.get("api_call_used"))
-            log(f"approved after {used} paid generation(s), strict score {row['final_score']}")
+            log(
+                f"{row['approval'].replace('-', ' ')} after {used} paid generation(s), "
+                f"strict score {row['final_score']}"
+            )
             break
 
         log(f"rejected: {row['failure_class']} — {review.get('reason', 'hard proof failure')}")
