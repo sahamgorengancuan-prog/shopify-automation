@@ -14,6 +14,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+import json as jsonlib
+
+from . import http
 from .bfl import BFLClient
 from .config import Settings
 from .discovery.google_trends import GoogleTrends
@@ -96,6 +99,29 @@ def check_storage(settings: Settings) -> CheckResult:
     )
 
 
+def _check_hf(settings: Settings) -> tuple[bool, str]:
+    """Is the Hugging Face token real, and which model would it reach?"""
+    if not settings.hf_token:
+        return False, "HF_TOKEN is not set"
+    try:
+        status, body = http.request(
+            "GET", "https://huggingface.co/api/whoami-v2",
+            headers={"Authorization": f"Bearer {settings.hf_token}"},
+            timeout=settings.http_timeout, retries=2,
+        )
+    except http.HttpError as exc:
+        return False, str(exc)
+    if status == 401:
+        return False, "HF_TOKEN was rejected (401) — check for a trailing space when pasting"
+    if status >= 400:
+        return False, f"hugging face returned HTTP {status}"
+    try:
+        name = jsonlib.loads(body.decode("utf-8")).get("name", "")
+    except Exception:
+        name = ""
+    return True, f"ok — token valid{f' for {name}' if name else ''}, model {settings.hf_image_model}"
+
+
 def run_checks(settings: Settings, *, include_generation: bool = True) -> list[CheckResult]:
     results = [check_environment(settings), check_storage(settings)]
 
@@ -154,21 +180,31 @@ def run_checks(settings: Settings, *, include_generation: bool = True) -> list[C
         )
     )
     if include_generation:
-        bfl = _timed(
-            "bfl (image generation)",
-            BFLClient(
-                settings.bfl_api_key,
-                base_url=settings.bfl_base_url,
-                model=settings.bfl_model,
-                timeout=settings.http_timeout,
-            ).check,
-            # A key that is present but rejected is a blocker; no key at all just
-            # means this run stops at prompts, which is a legitimate way to work.
-            required=bool(settings.bfl_api_key),
-        )
-        if not settings.bfl_api_key:
-            bfl.detail = "no key — the pipeline still runs and writes prompts, but renders nothing"
-        results.append(bfl)
+        # The probe follows the configured provider — checking a vendor this run
+        # will never call would report a health the run does not depend on.
+        if settings.image_provider == "bfl":
+            probe = _timed(
+                "image provider (bfl)",
+                BFLClient(
+                    settings.bfl_api_key, base_url=settings.bfl_base_url,
+                    model=settings.bfl_model, timeout=settings.http_timeout,
+                ).check,
+                # A key that is present but rejected is a blocker; no key at all
+                # just means this run stops at prompts, a legitimate way to work.
+                required=bool(settings.bfl_api_key),
+            )
+        else:
+            probe = _timed(
+                f"image provider (hf · {settings.hf_image_model})",
+                lambda: _check_hf(settings),
+                required=bool(settings.hf_token),
+            )
+        if not settings.has_image_credential:
+            probe.detail = (
+                f"no {settings.image_credential} — the pipeline still runs and writes prompts, "
+                "but renders nothing"
+            )
+        results.append(probe)
     results.append(
         _timed(
             "openai (creative assist)",

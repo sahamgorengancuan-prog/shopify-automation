@@ -174,7 +174,11 @@ def cmd_house(args: argparse.Namespace) -> int:
 
 
 def cmd_volume(args: argparse.Namespace) -> int:
-    """Rank the house root pool by relative search volume."""
+    """Compare search volume across terms the caller supplies.
+
+    V10.1 §21: this is a diagnostic, not a discovery source. There is no house
+    pool to fall back on, so the terms have to come from you.
+    """
     from .discovery import volume as volume_mod
     from .discovery.engine import DiscoveryConfig, DiscoveryEngine
 
@@ -186,7 +190,8 @@ def cmd_volume(args: argparse.Namespace) -> int:
         log=lambda line: print(line, flush=True),
     )
     try:
-        report = volume_mod.discover(engine, timeframe=settings.trends_timeframe,
+        roots = [term.strip() for term in str(getattr(args, "roots", "") or "").split(",") if term.strip()]
+        report = volume_mod.discover(engine, timeframe=settings.trends_timeframe, roots=roots,
                                      log=lambda line: print(line, flush=True))
     except volume_mod.VolumeDiscoveryError as error:
         print(f"stopped: {error}")
@@ -354,7 +359,7 @@ def build_parser() -> argparse.ArgumentParser:
     auto.add_argument("--no-llm", action="store_true")
     auto.set_defaults(func=cmd_autopilot)
 
-    house = sub.add_parser("house", help="the house system end to end (V9): route, one paid image, proof")
+    house = sub.add_parser("house", help="the house system end to end (V10.1): truth, route, one paid image, proof")
     house.add_argument("--topic", default="", help="override discovery with a market signal")
     house.add_argument("--garment", default=None)
     house.add_argument("--aggressiveness", type=int, default=3)
@@ -373,7 +378,9 @@ def build_parser() -> argparse.ArgumentParser:
     house.add_argument("--keep-style-lock", action="store_true")
     house.set_defaults(func=cmd_house)
 
-    volume = sub.add_parser("volume", help="rank the house root pool by relative search volume")
+    volume = sub.add_parser("volume", help="compare relative search volume across terms you supply")
+    volume.add_argument("--roots", default="",
+                        help="comma-separated one- or two-word terms to compare, e.g. harbor,radar")
     volume.set_defaults(func=cmd_volume)
 
     app = sub.add_parser("app", help="launch the Gradio control room")

@@ -6,9 +6,9 @@
 #    ./archivist.sh app                   launch the Gradio control room
 #    ./archivist.sh app --host 0.0.0.0    serve it on the network
 #    ./archivist.sh check                 connection self-test
-#    ./archivist.sh house                 V9 house system end to end
+#    ./archivist.sh house                 V10.1 house system end to end
 #    ./archivist.sh house --topic harbor  house system on a chosen signal
-#    ./archivist.sh volume                rank roots by relative search volume
+#    ./archivist.sh volume --roots a,b    compare search volume across your terms
 #    ./archivist.sh run "deep sea salvage" [--no-generate ...]
 #    ./archivist.sh plan "north sea oil" -n 6 --create
 #    ./archivist.sh scheduler             run the scheduler headless

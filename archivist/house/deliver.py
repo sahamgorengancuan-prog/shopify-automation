@@ -64,7 +64,7 @@ product description; it is never printed on the garment.
 
 def placement_spec(route: dict[str, Any]) -> dict[str, Any]:
     return {
-        "framework": "ARCHIVIST V9",
+        "framework": "ARCHIVIST V10.1",
         "system": HOUSE_RULES["system_name"],
         "anchor": route["asymmetry_anchor"],
         "logic": route["placement_logic"],

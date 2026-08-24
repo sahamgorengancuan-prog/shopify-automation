@@ -120,7 +120,7 @@ def create(route: dict[str, Any], output_path: Path | str, *, size: tuple[int, i
     image.save(output_path)
 
     spec = {
-        "framework": "ARCHIVIST V9",
+        "framework": "ARCHIVIST V10.1",
         "canvas": [width, height],
         "anchor": anchor,
         "silhouette": {"key": shape.key, "label": shape.label},

@@ -6,8 +6,16 @@ It reads Google Trends for what is rising, Reddit / X / Meta for whether anyone
 actually cares, and DuckDuckGo for how crowded the apparel market already is.
 It throws out everything it must not print, scores what survives, works out which
 survivors are the same cultural wave — and only then does the design work:
-reference mining, Visual DNA, a named art direction, three ranked concepts, BFL
-Context generation, and a print package a printer can take.
+reference mining, Visual DNA, a named art direction, three ranked concepts,
+image generation and a print package a printer can take.
+
+**A measured rise is not a reason to spend.** Before any image is paid for, the
+topic has to survive a *Market Truth* audit: what the term actually means, how
+ambiguous it is, which real community cares, why they would wear it, and which
+physical object is tied to that meaning — each claim citing public evidence the
+system fetched, not prose a model volunteered. Then the design itself is audited
+for authorship, because a mark with no physical cause is decoration, and
+decoration is what AI apparel already looks like.
 
 Everything runs from one Gradio control room: setup, connection tests,
 discovery, autopilot, monitoring, scheduling and deployment.
@@ -28,10 +36,32 @@ discovery, autopilot, monitoring, scheduling and deployment.
 │ ters     │  │ ment     │  │          │  │         │  │ tion   │  │ + gate │
 └──────────┘  └──────────┘  └──────────┘  └─────────┘  └────────┘  └───┬────┘
                                      ┌──────────┐  ┌──────────────┐    │
-                                     │  print   │◀─│ BFL Context  │◀───┘
-                                     │  package │  │ (references  │
-                                     └──────────┘  │  as context) │
+                                     │  print   │◀─│  generation  │◀───┘
+                                     │  package │  │ (owned blue- │
+                                     └──────────┘  │ print only)  │
                                                    └──────────────┘
+```
+
+Between the two halves stands the gate that decides whether the second half is
+allowed to cost anything:
+
+```
+   measured signal
+        │
+        ▼
+ ┌──────────────────┐   what does it mean? how ambiguous?
+ │   MARKET TRUTH   │   who cares, evidenced? why wear it?
+ │  evidence audit  │   which object is nameable?
+ └────────┬─────────┘
+          │ fail ──▶ STOP. research written, $0 spent.
+          ▼
+ ┌──────────────────┐   is the subject drawable, or a shrug?
+ │  SUBJECT + ART   │   does every mark have a physical cause?
+ │  DIRECTOR AUDIT  │   is copy rescuing an empty idea?
+ └────────┬─────────┘
+          │ fail ──▶ rebuild the route. still $0.
+          ▼
+   generation allowed
 ```
 
 ---
@@ -103,13 +133,13 @@ likeness and trademark risk. Rejections are listed in the UI with their category
 
 | tab | what it is for |
 |---|---|
-| **① Setup** | keys (BFL, OpenAI, Pexels, Reddit, X, Meta), geo, collection, garment, print size; writes `.env` |
-| **② Connection** | probes Python, disk, Google Trends, Reddit, X, Meta, DuckDuckGo, Pexels, BFL and GPT, with plain-language failures |
+| **① Setup** | image provider and keys (Hugging Face or BFL, OpenAI, Pexels, Reddit, X, Meta), geo, collection, garment, print size; writes `.env` |
+| **② Connection** | probes Python, disk, Google Trends, Reddit, X, Meta, DuckDuckGo, Pexels, the image provider and GPT, with plain-language failures |
 | **③ Discovery** | find opportunities with live evidence per topic — or **Run autopilot now** and let it design them |
 | **④ Studio** | the design pipeline on one topic: live log, reference board, ranked concepts, prompts, artwork, print package |
 | **⑤ Monitor** | every past run: report, assets, log, disk use |
 | **⑥ Schedule** | autopilot on a cadence (rediscovers every firing), or a planned collection of topics |
-| **⑦ House V9** | the house system end to end: creative route, owned blueprint, one paid image, measured proof, packaged delivery |
+| **⑦ House V10.1** | the house system end to end: creative route, owned blueprint, one paid image, measured proof, packaged delivery |
 | **⑧ Deploy** | Dockerfile, compose, systemd unit, Windows task and HF Space entry point, filled in with your port and paths |
 
 ---
@@ -127,8 +157,8 @@ likeness and trademark risk. Rejections are listed in the UI with their category
 | 7 | `dna` | the Visual DNA profile, every clause traceable to a measurement |
 | 8–9 | `direction` | a named art direction, saved as the collection's **style lock** |
 | 10 | `variations` | A safe commercial / B niche cultural / C extreme experimental, ranked |
-| 11 | `prompts`, `gate` | structured BFL Context prompt; eight-category gate, a fail forces a two-axis mutation |
-| 12 | `bfl` | generation with the references attached as context images |
+| 11 | `prompts`, `gate` | structured prompt contract; eight-category gate, a fail forces a two-axis mutation |
+| 12 | `image_provider` | generation conditioned on the owned blueprint (Hugging Face by default, BFL optional) |
 | 13 | `apparel` | transparent 300 dpi print file, separation preview, ink report, three-metre legibility check, mockup |
 | 14 | `board`, `brief` | reference board, creative brief, run report |
 
@@ -144,28 +174,41 @@ palette. Subjects change, the visual language does not.
 
 ---
 
-## The house system (V9)
+## The house system (V10.1)
 
 Beyond the generic pipeline there is a **house system**: one real material fact,
-transformed once, placed off-centre, finished with one printed sentence — and
-proved before it ships.
+transformed once, placed where its function puts it — and proved before it ships.
 
 ```bash
-python -m archivist house                       # discovery → route → art → proof → delivery
-python -m archivist house --topic harbor        # skip discovery, keep everything else
-python -m archivist house --no-generate         # blueprint, prompt contract and listing only
+python -m archivist house                       # discovery → truth → route → art → proof → delivery
+python -m archivist house --topic harbor        # skip discovery, keep every other gate
+python -m archivist house --no-generate         # route, audits and blueprint only, $0
 python -m archivist house --budget 2 --allow-edit          # allow one controlled edit
 python -m archivist house --reuse-raw runs/.../B_paid_01_raw.png   # recover, no new spend
-python -m archivist volume                      # rank the root pool by relative search volume
+python -m archivist volume --roots harbor,radar # a diagnostic you supply terms to
 ```
 
 | guarantee | how |
 |---|---|
+| **nothing is spent on a guess** | live generation requires `market_truth.passed`: meaning, ambiguity, an evidenced community, a reason to wear it and a nameable symbol, each citing rows the system fetched. Absence of that object is a failure, not permission |
+| **no semantic leap** | a claimed symbol must share real vocabulary with the evidence cited for it — the check that stops "a page about a game called *Harbor*" becoming "a mooring bollard" |
+| **no invented buyer** | a taste description ("design-literate minimalists") and a wall of Etsy listings both fail buyer proof. A community has to be findable |
 | **owned conditioning** | only a blueprint this code draws reaches the image model; searched references inform the brief, never the pixels |
-| **a nameable subject** | the blueprint carries the subject's silhouette archetype (arm, tower, plate, strata, truss, hull, wall) and the prompt names it — the fix for a real failure where a strong composition read as generic rubble and the critic scored `subject_truth: 3` |
-| **real typography** | the statement is typeset from a real font at a measured cap height (≥2.4mm), after generation, and the runtime is proved *before* anything is paid for |
+| **a nameable subject** | the blueprint carries the subject's silhouette archetype (bollard, arm, tower, plate, strata, truss, hull, wall) and the prompt names it. The generic `mass` shrug can be previewed but never conditions a paid call |
+| **authorship before spend** | a route whose language admits to waves, swooshes, floating fragments, even distress or meaningless symbols is refused before a provider is reached — as is one that never says *why* the material behaves that way |
+| **optional typography** | copy is opt-in. No copy is a finished state, not a missing one; supplied copy is validated and typeset from a real font at a measured cap height (≥2.4mm) |
 | **budget discipline** | one paid generation by default; a second only for a stated reason — a controlled edit, or a route rebuilt from the critic's own words |
-| **no false finals** | a candidate that fails the proof is packaged as `REJECTED_review.zip` with every measurement, not shipped |
+| **no false finals** | a candidate that fails the proof is packaged as `REJECTED_review.zip` with every measurement, not shipped. An offline run is recorded as `offline-rehearsal-approved`, never as market approval |
+
+### What gets written, so a spend can be argued with
+
+| file | what it answers |
+|---|---|
+| `runs/_discovery/market_truth_latest.json` | every autonomous candidate audited, including the rejected ones and why |
+| `runs/_discovery/user_topic_market_truth_latest.json` | the same audit for a topic you named |
+| `<run>/preinference_audit.json` | the four verdicts that allowed (or blocked) the paid call: market truth, subject, art director, blueprint policy |
+| `<run>/candidate_ranking.json` | deterministic measurements, critic result, failure class, paid-call accounting, and whether a vision review actually ran |
+| `<run>/REJECTED_review.zip` | the failure, kept whole, instead of a final nobody should trust |
 
 ### What the proof measures
 
@@ -227,7 +270,7 @@ runs/<collection>/<timestamp>-<topic>/
 ├── brief_<A|B|C>.md       creative brief per direction
 ├── queries.json           every search that was run
 ├── references/            mined images + thumbnails
-├── prompts/               BFL prompt and negative constraints per direction
+├── prompts/               prompt contract and negative constraints per direction
 ├── artwork/               generated frames
 ├── print/                 print file, separation, legibility check, mockup
 └── run.log                timestamped stage log
@@ -240,7 +283,12 @@ Every setting is an environment variable or a field in the Setup tab — see
 
 | variable | default | meaning |
 |---|---|---|
-| `BFL_API_KEY` | — | required to generate artwork |
+| `HF_TOKEN` | — | required to generate artwork (default provider) |
+| `ARCHIVIST_IMAGE_PROVIDER` | `hf` | `hf` (Qwen) or `bfl` |
+| `HF_IMAGE_MODEL` | `Qwen/Qwen-Image-Edit` | context-edit model |
+| `BFL_API_KEY` | — | only used when the provider is `bfl` |
+| `ARCHIVIST_MARKET_TRUTH_MIN_CONFIDENCE` | `0.70` | confidence floor for the evidence audit |
+| `ARCHIVIST_PRINT_STATEMENT` | `0` | copy is opt-in; empty is a finished state |
 | `OPENAI_API_KEY` | — | optional: judges topics, sharpens the direction (GPT-5.1) |
 | `REDDIT_CLIENT_ID` / `_SECRET` | — | optional: use if anonymous Reddit is blocked from your IP |
 | `X_BEARER_TOKEN` | — | optional: X API v2 social heat |
@@ -291,7 +339,7 @@ Optional: `ddgs` (tracks DuckDuckGo endpoint changes), `python-dotenv`.
 
 External services: **Google Trends** and **DuckDuckGo** (no key, unofficial
 endpoints — rate limited, and the code degrades when they refuse), **Reddit**
-(anonymous or OAuth), **X** and **Meta** (paid / business credentials), **BFL**
+(anonymous or OAuth), **X** and **Meta** (paid / business credentials), **Hugging Face**
 for generation, **Pexels** for photography, **OpenAI GPT-5.1** for judgement.
 
 ## Using it responsibly

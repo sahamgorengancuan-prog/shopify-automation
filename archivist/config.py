@@ -130,7 +130,7 @@ class Settings:
     autopilot_designs: int = 1
     reddit_allow_anonymous: bool = True
 
-    # --- house system (V9) ------------------------------------------------
+    # --- house system (V10.1) ------------------------------------------------
     house_paid_budget: int = 1            # paid generations per design, 1 or 2
     house_allow_controlled_edit: bool = False
     house_allow_concept_retry: bool = False

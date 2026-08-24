@@ -388,7 +388,7 @@ class HouseMode:
             for item in references if item.role
         ]
         return "\n".join([
-            "# ARCHIVIST HOUSE BRIEF (V9)", "",
+            "# ARCHIVIST HOUSE BRIEF (V10.1)", "",
             f"**PRODUCT:** {route['product_title']}", "",
             f"**EVIDENCE:** {route['real_subject']} — {route['source_property']}", "",
             f"**ONE MUTATION:** {route['mutation']} — {route['metaphor']}", "",

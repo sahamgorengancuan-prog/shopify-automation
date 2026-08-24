@@ -31,10 +31,10 @@ spending anything.
 
 ```bat
 run_pipeline.bat --auto                  discover AND design: the whole bot
-run_pipeline.bat --house                 the V9 house system end to end
+run_pipeline.bat --house                 the V10.1 house system end to end
 run_pipeline.bat --house --topic harbor  the house system on a chosen signal
 run_pipeline.bat --house --no-generate   blueprint, prompt contract and listing only
-run_pipeline.bat --volume                rank roots by relative search volume
+run_pipeline.bat --volume --roots harbor,radar   compare volume across your terms
 run_pipeline.bat --discover -n 8         research only
 run_pipeline.bat "deep sea salvage" --no-generate
 run_pipeline.bat --check                 connection self-test
@@ -43,7 +43,16 @@ run_pipeline.bat --plan "north sea oil"  auto-plan a collection
 
 Set `ARCHIVIST_OFFLINE=1` before any of them to rehearse the entire chain with
 no network and no spend. Offline runs cannot call the vision critic, so they are
-approved on the deterministic print proof alone and say so.
+approved on the deterministic print proof alone, recorded as
+`offline-rehearsal-approved` rather than as market approval.
+
+### Keys
+
+`HF_TOKEN` is the one that matters — Hugging Face is the default image provider
+(`Qwen/Qwen-Image-Edit`). Set `ARCHIVIST_IMAGE_PROVIDER=bfl` and `BFL_API_KEY`
+instead if you have existing BFL credit. `OPENAI_API_KEY` is what audits Market
+Truth: without it a live run is research-only, because nothing can verify what
+a topic means or who cares.
 
 ### Colab / Jupyter
 

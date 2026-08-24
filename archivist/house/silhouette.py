@@ -1,6 +1,6 @@
 """Subject-shaped silhouettes for the owned blueprint.
 
-This module exists because of a real failure. The first paid V9 run passed every
+This module exists because of a real failure. The first paid house run passed every
 deterministic gate — asymmetry, envelope, ink, clean edges, legible statement —
 and was still rejected by the vision critic with ``subject_truth: 3``:
 

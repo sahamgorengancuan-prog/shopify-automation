@@ -33,10 +33,12 @@ REPO_WEB = "https://github.com/sahamgorengancuan-prog/shopify-automation"
 
 # name, required-for, what happens without it
 SECRET_SPECS: tuple[tuple[str, str, str], ...] = (
-    ("BFL_API_KEY", "image generation",
+    ("HF_TOKEN", "image generation (the default provider)",
      "the run stops after the blueprint and prompt contract — nothing is rendered"),
-    ("OPENAI_API_KEY", "creative route and the visual critic",
-     "audited fallback routes are used and no candidate can be visually approved"),
+    ("OPENAI_API_KEY", "market truth, the creative route and the visual critic",
+     "market truth cannot pass, so live generation stays blocked and the run is research only"),
+    ("BFL_API_KEY", "image generation, only with ARCHIVIST_IMAGE_PROVIDER=bfl",
+     "ignored unless the bfl provider is selected"),
     ("PEXELS_API_KEY", "reference photography",
      "reference mining falls back to DuckDuckGo alone"),
     ("REDDIT_CLIENT_ID", "social heat (with the secret)",
@@ -47,7 +49,7 @@ SECRET_SPECS: tuple[tuple[str, str, str], ...] = (
     ("META_IG_USER_ID", "Instagram hashtag heat", "Meta is skipped"),
 )
 
-REQUIRED_FOR_IMAGES = ("BFL_API_KEY",)
+REQUIRED_FOR_IMAGES = ("HF_TOKEN",)
 MINIMAL_PACKAGES = ("Pillow", "requests", "ddgs")
 
 
@@ -242,7 +244,8 @@ def capability_line(statuses: Iterable[SecretStatus], *, offline: bool) -> str:
     if "BFL_API_KEY" not in have:
         return "🟡 no BFL key — the run will stop after the prompt contract; nothing will be rendered"
     if "OPENAI_API_KEY" not in have:
-        return "🟡 no OpenAI key — audited fallback routes, and no visual critic (set REQUIRE_VISION_CRITIC=False)"
+        return ("🟡 no OpenAI key — market truth cannot be audited, so live generation stays "
+                "blocked. Research artefacts are still written.")
     return "🟢 ready — discovery, creative route, one paid generation, visual critic, delivery"
 
 
@@ -310,8 +313,9 @@ def proof_lines(delivery) -> list[str]:
         f"{'asymmetry / shift':<20}: {measured.get('asymmetry')} / {measured.get('mass_shift')}",
         f"{'hero envelope':<20}: {measured.get('hero_envelope_ratio')}",
         f"{'ink coverage':<20}: {measured.get('ink_coverage')}% (expected {measured.get('expected_ink_range')})",
-        f"{'statement':<20}: {statement.get('cap_height_mm')}mm cap height, "
-        f"contrast {statement.get('contrast_ratio')}:1",
+        (f"{'statement':<20}: {statement.get('cap_height_mm')}mm cap height, "
+         f"contrast {statement.get('contrast_ratio')}:1") if statement.get("applied")
+        else f"{'statement':<20}: none — this design carries no copy, which is a finished state",
         f"{'heuristic total':<20}: {measured.get('heuristic_total')}",
     ]
     if review:
@@ -326,9 +330,11 @@ def preview_images(result) -> list[tuple[str, str]]:
     pairs: list[tuple[str, str]] = []
     if getattr(result, "delivery", None):
         final = Path(result.delivery.final_dir)
+        printed = bool((result.delivery.selected.get("statement_spec") or {}).get("applied"))
         for name, caption in (
             ("FINAL_mockup.png", "garment proof"),
-            ("FINAL_artwork.png", "composed artwork with the typeset statement"),
+            ("FINAL_artwork.png",
+             "composed artwork with the typeset statement" if printed else "composed artwork"),
             ("FINAL_print.png", "print file"),
             ("FINAL_blueprint.png", "the owned blueprint that conditioned generation"),
         ):

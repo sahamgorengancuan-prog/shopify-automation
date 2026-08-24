@@ -8,7 +8,7 @@ Six tabs, one job each:
   ④ STUDIO      run the pipeline with a live log, galleries and print packages
   ⑤ MONITOR     every past run, its report, its assets, its log
   ⑥ SCHEDULE    autopilot on a cadence, or a planned collection of topics
-  ⑦ HOUSE V9    the house system: owned blueprint, one paid image, measured proof
+  ⑦ HOUSE V10.1   the house system: owned blueprint, one paid image, measured proof
   ⑧ DEPLOY      Docker / systemd / Windows Task / HF Space, written out filled in
 
 Run it with ``python -m archivist.app`` (or the .bat / .sh launchers).
@@ -57,7 +57,7 @@ footer { display:none !important; }
 
 HEADER = """<div id="arc-head">
 <h1>Archivist</h1>
-<p>auto trend discovery → reference mining → BFL context → apparel graphics</p>
+<p>public signal → market truth → evidence-bound route → owned blueprint → apparel graphics</p>
 </div>"""
 
 
@@ -163,7 +163,7 @@ def capability_markdown(settings: Settings) -> str:
         "",
         f"**runs directory** `{Path(settings.runs_dir).resolve()}`  ·  "
         f"**collection** `{settings.collection}`  ·  "
-        f"**model** `{settings.bfl_model}`  ·  "
+        f"**image** `{settings.hf_image_model if settings.image_provider == 'hf' else settings.bfl_model}`  ·  "
         f"**print** {settings.print_width_in:g}in @ {settings.print_dpi} dpi",
     ]
     return "\n".join(lines)
@@ -230,6 +230,7 @@ def summary_markdown(result: RunResult | None) -> str:
 # ① setup
 # --------------------------------------------------------------------------
 def save_setup(
+    hf_key: str,
     bfl_key: str,
     pexels_key: str,
     openai_key: str,
@@ -238,6 +239,8 @@ def save_setup(
     x_token: str,
     meta_token: str,
     meta_user: str,
+    image_provider: str,
+    hf_image_model: str,
     bfl_model: str,
     openai_model: str,
     collection: str,
@@ -250,6 +253,9 @@ def save_setup(
     offline: bool,
 ) -> tuple[str, str]:
     values = {
+        "HF_TOKEN": hf_key.strip(),
+        "ARCHIVIST_IMAGE_PROVIDER": (image_provider or "hf").strip(),
+        "HF_IMAGE_MODEL": hf_image_model.strip() or "Qwen/Qwen-Image-Edit",
         "BFL_API_KEY": bfl_key.strip(),
         "PEXELS_API_KEY": pexels_key.strip(),
         "OPENAI_API_KEY": openai_key.strip(),
@@ -288,9 +294,13 @@ def setup_tab() -> None:
     with gr.Row():
         with gr.Column(scale=3):
             with gr.Group():
+                hf_key = gr.Textbox(
+                    label="HF_TOKEN", type="password", placeholder="required to generate artwork",
+                    info="huggingface.co → Settings → Access Tokens. The default provider.",
+                )
                 bfl_key = gr.Textbox(
-                    label="BFL_API_KEY", type="password", placeholder="required to generate artwork",
-                    info="api.bfl.ai — Kontext models take the mined references as context images",
+                    label="BFL_API_KEY", type="password", placeholder="only for the bfl provider",
+                    info="api.bfl.ai — kept as a compatibility option, not the default",
                 )
                 pexels_key = gr.Textbox(
                     label="PEXELS_API_KEY", type="password", placeholder="optional",
@@ -319,6 +329,15 @@ def setup_tab() -> None:
                 trends_geo = gr.Textbox(value=STATE.settings.trends_geo, label="Google Trends geo",
                                         info="US, GB, ID, DE… blank searches worldwide")
             with gr.Row():
+                image_provider = gr.Radio(
+                    ["hf", "bfl"], value=STATE.settings.image_provider, label="Image provider",
+                    info="hugging face (Qwen) by default; bfl stays available for existing credit",
+                )
+                hf_image_model = gr.Textbox(
+                    value=STATE.settings.hf_image_model, label="HF image model",
+                    info="context edits; text-to-image falls back automatically",
+                )
+            with gr.Row():
                 bfl_model = gr.Dropdown(BFL_MODELS, value=STATE.settings.bfl_model, label="BFL model")
                 openai_model = gr.Dropdown(
                     OPENAI_MODELS, value=STATE.settings.openai_model, label="Creative assist model"
@@ -345,7 +364,8 @@ def setup_tab() -> None:
             refresh_capability = gr.Button("Refresh", size="sm")
             with gr.Accordion("Where do the keys come from?", open=False):
                 gr.Markdown(
-                    "- **BFL** — https://api.bfl.ai, dashboard → API keys. Charged per generation.\n"
+                    "- **Hugging Face** — https://huggingface.co/settings/tokens. The default provider.\n"
+                    "- **BFL** — https://api.bfl.ai, dashboard → API keys. Optional compatibility path.\n"
                     "- **Pexels** — https://www.pexels.com/api/, free key, attribution is carried "
                     "through onto the reference board automatically.\n"
                     "- **OpenAI** — https://platform.openai.com/api-keys. Optional; GPT-5.1 sharpens "
@@ -368,8 +388,9 @@ def setup_tab() -> None:
 
     save_button.click(
         save_setup,
-        inputs=[bfl_key, pexels_key, openai_key, reddit_id, reddit_secret, x_token, meta_token,
-                meta_user, bfl_model, openai_model, collection, garment, aspect, width_in, dpi,
+        inputs=[hf_key, bfl_key, pexels_key, openai_key, reddit_id, reddit_secret, x_token, meta_token,
+                meta_user, image_provider, hf_image_model, bfl_model, openai_model, collection,
+                garment, aspect, width_in, dpi,
                 runs_dir, trends_geo, offline],
         outputs=[saved_note, capability],
     )
@@ -388,12 +409,12 @@ def run_connection_checks(include_generation: bool) -> tuple[str, list[list[str]
 def connection_tab() -> None:
     gr.Markdown(
         "### ② Connection test\n"
-        "Probe every dependency before a run: Python and Pillow, disk, DuckDuckGo, Pexels, the BFL "
+        "Probe every dependency before a run: Python and Pillow, disk, DuckDuckGo, Pexels, the image "
         "key, and the optional creative assist. A red row is a blocker; a yellow row degrades one "
         "stage and the pipeline still completes."
     )
     with gr.Row():
-        include_generation = gr.Checkbox(value=True, label="Include BFL key probe")
+        include_generation = gr.Checkbox(value=True, label="Include image provider probe")
         test_button = gr.Button("Run all checks", variant="primary", scale=2)
     summary = gr.Markdown("_not tested yet_", elem_classes="arc-status")
     table = gr.Dataframe(
@@ -408,7 +429,7 @@ def connection_tab() -> None:
             "- **duckduckgo fail** — rate limited or blocked by a network policy. Wait a minute, or "
             "install `ddgs` (`pip install ddgs`) which tracks endpoint changes, or switch on offline mode.\n"
             "- **pexels 401** — key typo, or the key was revoked. Optional; mining continues without it.\n"
-            "- **bfl 401/403** — key rejected. Check for a trailing space when pasting.\n"
+            "- **provider 401/403** — key rejected. Check for a trailing space when pasting.\n"
             "- **storage low disk** — a run writes 20–60 reference images plus print files; keep a "
             "few hundred MB free.\n"
             "- **openai fail** — optional. A 404 usually means the key has no access to the chosen "
@@ -660,7 +681,7 @@ def discovery_tab() -> None:
             auto_collection = gr.Textbox(value=STATE.settings.collection, label="Collection")
             auto_garment = gr.Dropdown(GARMENTS, value=STATE.settings.garment, label="Garment")
             auto_aggr = gr.Slider(0, 10, value=5, step=1, label="Aggressiveness")
-            auto_generate = gr.Checkbox(value=True, label="Generate artwork (spends BFL credits)")
+            auto_generate = gr.Checkbox(value=True, label="Generate artwork (spends provider credits)")
             autopilot_button = gr.Button("Run autopilot now", variant="primary")
             gr.Markdown(
                 "Autopilot writes the discovery evidence into every run manifest, so each design can "
@@ -856,7 +877,7 @@ def regenerate_variant(key: str, seed: int, garment: str) -> tuple[str, list, li
         return "no run loaded", [], []
     settings = STATE.refresh_settings()
     if not settings.can_generate:
-        return "BFL_API_KEY is not set — nothing to regenerate with", [], []
+        return f"{STATE.settings.image_credential} is not set — nothing to regenerate with", [], []
     from .pipeline import regenerate as regenerate_run
 
     try:
@@ -895,7 +916,7 @@ def studio_tab() -> None:
     gr.Markdown(
         "### ③ Studio\n"
         "One topic in, a full run out: niche ladder → queries → mined references → scored board → "
-        "Visual DNA → art direction → three ranked directions → BFL prompts → artwork → print package."
+        "Visual DNA → art direction → three ranked directions → prompts → artwork → print package."
     )
     with gr.Row():
         with gr.Column(scale=2):
@@ -1294,7 +1315,7 @@ def schedule_tab() -> None:
 
 
 # --------------------------------------------------------------------------
-# ⑦ house system (V9)
+# ⑦ house system (V10.1)
 # --------------------------------------------------------------------------
 def _house_files(result) -> list[str]:
     files: list[str] = []
@@ -1446,7 +1467,7 @@ def house_run(topic: str, collection: str, garment: str, aggressiveness: int, bu
 
 def house_tab() -> None:
     gr.Markdown(
-        "### ⑦ House system (V9)\n"
+        "### ⑦ House system (V10.1)\n"
         "One real material fact, transformed once, placed off-centre, finished with one printed "
         "sentence. Only an owned blueprint conditions the image model; the statement is typeset by "
         "code; one paid generation is the default, and nothing ships unless the measured proof passes."
@@ -1631,7 +1652,7 @@ def build_app() -> gr.Blocks:
                 monitor_tab()
             with gr.Tab("⑥ Schedule"):
                 schedule_tab()
-            with gr.Tab("⑦ House V9"):
+            with gr.Tab("⑦ House V10.1"):
                 house_tab()
             with gr.Tab("⑧ Deploy"):
                 deploy_tab()
