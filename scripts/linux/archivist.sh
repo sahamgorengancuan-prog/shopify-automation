@@ -9,6 +9,9 @@
 #    ./archivist.sh house                 V10.1 house system end to end
 #    ./archivist.sh house --topic harbor  house system on a chosen signal
 #    ./archivist.sh volume --roots a,b    compare search volume across your terms
+#    ./archivist.sh prepare <run-dir>     build the listing package from an approved run
+#    ./archivist.sh publish <pkg.json>    route it to channels (dry run unless --live)
+#    ./archivist.sh assets <public-dir>   serve staged print files for Printful
 #    ./archivist.sh run "deep sea salvage" [--no-generate ...]
 #    ./archivist.sh plan "north sea oil" -n 6 --create
 #    ./archivist.sh scheduler             run the scheduler headless
@@ -118,6 +121,9 @@ cmd_run()       { ensure_env; exec "$PY" -m archivist run "$@"; }
 cmd_house()     { ensure_env; banner "house system"; exec "$PY" -m archivist house "$@"; }
 cmd_volume()    { ensure_env; exec "$PY" -m archivist volume "$@"; }
 cmd_check()     { ensure_env; exec "$PY" -m archivist check "$@"; }
+cmd_prepare()   { ensure_env; exec "$PY" -m archivist commerce-prepare "$@"; }
+cmd_publish()   { ensure_env; exec "$PY" -m archivist commerce-publish "$@"; }
+cmd_assets()    { ensure_env; exec "$PY" -m archivist commerce-assets "$@"; }
 cmd_plan()      { ensure_env; exec "$PY" -m archivist plan "$@"; }
 cmd_runs()      { ensure_env; exec "$PY" -m archivist runs "$@"; }
 cmd_jobs()      { ensure_env; exec "$PY" -m archivist jobs "$@"; }
@@ -188,6 +194,9 @@ main() {
         house)      cmd_house "$@" ;;
         volume)     cmd_volume "$@" ;;
         check)      cmd_check "$@" ;;
+        prepare)    cmd_prepare "$@" ;;
+        publish)    cmd_publish "$@" ;;
+        assets)     cmd_assets "$@" ;;
         plan)       cmd_plan "$@" ;;
         runs)       cmd_runs "$@" ;;
         jobs)       cmd_jobs "$@" ;;

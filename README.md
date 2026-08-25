@@ -18,7 +18,9 @@ for authorship, because a mark with no physical cause is decoration, and
 decoration is what AI apparel already looks like.
 
 Everything runs from one Gradio control room: setup, connection tests,
-discovery, autopilot, monitoring, scheduling and deployment.
+discovery, autopilot, monitoring, scheduling, commerce and deployment. An
+approved design can then become an Etsy or Shopify listing with Printful or
+Printify fulfilment — always downstream of approval, never a way around it.
 
 ```
  ─────────────────────────── the bot decides what to make ───────────────────────────
@@ -140,6 +142,7 @@ likeness and trademark risk. Rejections are listed in the UI with their category
 | **⑤ Monitor** | every past run: report, assets, log, disk use |
 | **⑥ Schedule** | autopilot on a cadence (rediscovers every firing), or a planned collection of topics |
 | **⑦ House V10.1** | the house system end to end: creative route, owned blueprint, one paid image, measured proof, packaged delivery |
+| **⑧ Commerce** | listing package, five-image storefront sequence, optional Etsy / Shopify / Printful / Printify — dry run and draft by default |
 | **⑧ Deploy** | Dockerfile, compose, systemd unit, Windows task and HF Space entry point, filled in with your port and paths |
 
 ---
@@ -239,6 +242,49 @@ fewer than 80% of the pool answered the ranking is abandoned rather than chosen
 from holes. Only the leading quartile gets the expensive per-topic measurement,
 and an intent gate then rejects leaders whose meaning is too ambiguous to design.
 
+
+---
+
+## Selling it (V10.2)
+
+Commerce is **downstream of an approved design and nothing else**. No adapter can
+reach backwards into the pipeline, and no channel key is a dependency of any
+creative stage — an unconfigured store means "no channel", never a degraded run.
+That ordering is the point: a marketplace deadline must not be able to push an
+unproven concept through the art system.
+
+```bash
+python -m archivist commerce-prepare runs/default/<run>          # package + gallery, $0
+python -m archivist commerce-publish <package.json> \
+    --channels etsy shopify --fulfillment printify               # DRY RUN by default
+python -m archivist commerce-publish <package.json> --channels etsy --live          # real, draft
+python -m archivist commerce-publish <package.json> --channels etsy --live --active # real, live
+python -m archivist commerce-assets commerce/<id>/public --port 8090   # staging for Printful
+```
+
+One approved design becomes a **five-image editorial sequence** — collection tile,
+garment hero, perspective, artwork detail, process study — with a layout signature
+hashed from the package identity, so adjacent listings rotate through six
+composition families and a rebuild does not reshuffle a listing that was already
+live. The artwork itself is never warped; only the framing changes.
+
+| guarantee | how |
+|---|---|
+| **a rehearsal is not a listing** | an offline run fetched no evidence and asked no auditor. It can be previewed, never published — and the router refuses a live publish of an unapproved package outright |
+| **the gates travel with the package** | approval is read from the run's own `preinference_audit.json`, so a failed subject or authorship gate blocks the listing, not just the generation |
+| **copy cannot invent** | the copywriter receives only evidenced fields and may rewrite them, never add. No fake heritage, dates, geography, materials, scarcity or personas; a deterministic writer works with no API key |
+| **research is not a licence** | reference pixels never reach a storefront unless a local `commerce_reference_manifest.json` marks them commerce-safe |
+| **secrets stay secret** | Etsy, Shopify, Printful and Printify tokens are redacted from every manifest, like image credentials |
+| **honest limits** | Etsy does not expose shop CSS, a separately created POD product is not an order binding, and theme code is never mutated through a product token. Each is stated rather than hand-waved |
+
+Publishing writes `etsy_request.json`, `shopify_response.json`, `commerce_receipt.json`
+and friends, so what was attempted — and what still needs a human — is inspectable
+after the fact. A commerce failure never triggers another image generation: paying
+twice for the same artwork because an API rejected a title is not a creative problem.
+
+Zero-touch is available and off by default (`ARCHIVIST_COMMERCE_AUTO_PUBLISH=1`
+plus `..._AUTO_CHANNELS`). Shopify's optional collage sections live in
+`integrations/shopify_theme/` and are installed once, by you.
 
 ---
 

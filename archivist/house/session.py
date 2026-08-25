@@ -153,6 +153,47 @@ def _market_truth(market_signal: str, settings: Settings, llm, *, log: Log,
     return verdict
 
 
+def _auto_publish(house_result: "HouseResult", settings: Settings, options, *, log: Log) -> None:
+    """Hand an approved delivery to the configured commerce route.
+
+    A commerce failure is not a creative failure: the artwork is already paid
+    for and approved, so anything that goes wrong here becomes a warning and an
+    audit receipt to retry from, never a reason to generate again.
+    """
+    if settings.offline:
+        log("commerce auto-publish skipped: this was an offline rehearsal, not a market-approved run")
+        return
+
+    from ..commerce.builder import build_commerce_package
+    from ..commerce.router import CommerceRouter
+
+    run_dir = Path(house_result.result.run_dir)
+    try:
+        package = build_commerce_package(run_dir, settings, require_approved=True,
+                                         use_llm=bool(options.use_llm))
+        channels = [name.strip() for name in settings.commerce_auto_channels.split(",") if name.strip()]
+        receipt = CommerceRouter(settings).publish(
+            package, channels=channels, fulfillment=settings.commerce_auto_fulfillment,
+            dry_run=False, active=settings.commerce_auto_active,
+            pod_native_channel=settings.commerce_pod_native_channel,
+        )
+        commerce_dir = run_dir / "commerce" / package.id
+        house_result.files["commerce_package"] = str(commerce_dir / "commerce_package.json")
+        house_result.files["commerce_receipt"] = str(commerce_dir / "publish" / "commerce_receipt.json")
+        log(f"commerce auto-publish: channels={channels or ['none']} "
+            f"fulfillment={settings.commerce_auto_fulfillment} ok={receipt.ok}")
+        if not receipt.ok:
+            house_result.warnings.append(
+                "commerce auto-publish had failing targets — the artwork stands, inspect commerce_receipt.json"
+            )
+    except Exception as exc:
+        house_result.warnings.append(
+            f"commerce auto-publish failed without invalidating the approved artwork: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        log(house_result.warnings[-1])
+
+
 def run_session(
     settings: Settings | None = None,
     options: PipelineOptions | None = None,
@@ -304,6 +345,13 @@ def run_session(
     # 5 — delivery ---------------------------------------------------------
     progress(0.95, "writing the delivery")
     house_result.files = deliver.write_all(result, route, house_result.delivery)
+
+    # 6 — optional zero-touch commerce -------------------------------------
+    # OFF by default. Enabling it is an explicit instruction to create real
+    # marketplace objects, so it runs only after an approved *live* delivery.
+    if settings.commerce_auto_publish and house_result.delivery:
+        _auto_publish(house_result, settings, options, log=log)
+
     dump_json(result, Path(result.run_dir) / "manifest.json")
     progress(1.0, house_result.summary())
     log(house_result.summary())

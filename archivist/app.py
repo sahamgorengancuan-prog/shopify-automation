@@ -82,6 +82,7 @@ class AppState:
         self.staged_topic: str = ""
         self.house_log: deque[str] = deque(maxlen=500)
         self.last_house: Any = None
+        self.last_commerce: Any = None
 
     def _on_event(self, message: str) -> None:
         self.sched_log.append(f"{datetime.now().strftime('%H:%M:%S')}  {message}")
@@ -1568,6 +1569,240 @@ def write_deploy(port: int, image: str, user: str, workdir: str, windows_workdir
     return note, written, notes_file.read_text(encoding="utf-8") if notes_file.is_file() else ""
 
 
+# --------------------------------------------------------------------------
+# ⑧ commerce
+# --------------------------------------------------------------------------
+def save_commerce_config(
+    brand: str, base_price: str, public_base_url: str,
+    etsy_key: str, etsy_token: str, etsy_shop: str, etsy_taxonomy: str,
+    etsy_shipping: str, etsy_readiness: str,
+    shopify_domain: str, shopify_token: str, shopify_version: str,
+    printful_token: str, printful_variants: str,
+    printify_token: str, printify_shop: str, printify_blueprint: str,
+    printify_provider: str, printify_variants: str,
+    auto_publish: bool, auto_channels: list[str], auto_fulfillment: str, auto_active: bool,
+    pod_native: bool,
+) -> str:
+    """Blank secret fields leave the stored value alone, so re-saving is safe."""
+    values = {
+        "ARCHIVIST_COMMERCE_BRAND": brand.strip() or "ARCHIVIST",
+        "ARCHIVIST_COMMERCE_BASE_PRICE": base_price.strip() or "34.00",
+        "ARCHIVIST_PUBLIC_ASSET_BASE_URL": public_base_url.strip(),
+        "ETSY_SHOP_ID": etsy_shop.strip(),
+        "ETSY_TAXONOMY_ID": etsy_taxonomy.strip(),
+        "ETSY_SHIPPING_PROFILE_ID": etsy_shipping.strip(),
+        "ETSY_READINESS_STATE_ID": etsy_readiness.strip(),
+        "SHOPIFY_STORE_DOMAIN": shopify_domain.strip(),
+        "SHOPIFY_API_VERSION": shopify_version.strip() or "2026-07",
+        "PRINTFUL_VARIANT_IDS": printful_variants.strip(),
+        "PRINTIFY_SHOP_ID": printify_shop.strip(),
+        "PRINTIFY_BLUEPRINT_ID": printify_blueprint.strip(),
+        "PRINTIFY_PROVIDER_ID": printify_provider.strip(),
+        "PRINTIFY_VARIANT_IDS": printify_variants.strip(),
+        "ARCHIVIST_COMMERCE_AUTO_PUBLISH": "1" if auto_publish else "0",
+        "ARCHIVIST_COMMERCE_AUTO_CHANNELS": ",".join(auto_channels or []),
+        "ARCHIVIST_COMMERCE_AUTO_FULFILLMENT": auto_fulfillment or "none",
+        "ARCHIVIST_COMMERCE_AUTO_ACTIVE": "1" if auto_active else "0",
+        "ARCHIVIST_COMMERCE_POD_NATIVE_CHANNEL": "1" if pod_native else "0",
+    }
+    for key, value in (("ETSY_API_KEY", etsy_key), ("ETSY_ACCESS_TOKEN", etsy_token),
+                       ("SHOPIFY_ACCESS_TOKEN", shopify_token), ("PRINTFUL_TOKEN", printful_token),
+                       ("PRINTIFY_TOKEN", printify_token)):
+        if value.strip():
+            values[key] = value.strip()
+
+    path = write_env(values, STATE.settings.root)
+    STATE.reload()
+    return f"✅ commerce configuration saved to `{path}`. Blank secret fields kept their stored value."
+
+
+def commerce_latest_run() -> str:
+    """The newest house run, which is usually the one you want to list."""
+    if STATE.last_house is not None and getattr(STATE.last_house, "result", None):
+        return str(STATE.last_house.result.run_dir)
+    runs = sorted(Path(STATE.settings.runs_dir).glob("*/*/creative_bridge.json"),
+                  key=lambda path: path.stat().st_mtime, reverse=True)
+    return str(runs[0].parent) if runs else ""
+
+
+def commerce_prepare_ui(run_dir: str, price: str, sizes: str, brand: str,
+                        use_llm: bool, allow_rehearsal: bool):
+    from .commerce.builder import build_commerce_package
+    from .commerce.errors import PackageBuildError
+
+    if not run_dir.strip():
+        return "Point this at an approved run directory first.", [], ""
+    try:
+        package = build_commerce_package(
+            run_dir.strip(), STATE.settings, base_price=price.strip() or None,
+            sizes=sizes.strip() or "S,M,L,XL,2XL", brand=brand.strip() or None,
+            require_approved=not allow_rehearsal, use_llm=use_llm,
+        )
+    except PackageBuildError as error:
+        return f"❌ {error}", [], ""
+
+    STATE.last_commerce = package
+    gallery = [(asset.path, f"{asset.rank:02d} · {asset.role}") for asset in package.storefront.gallery
+               if Path(asset.path).is_file()]
+    manifest = Path(package.source_run_dir) / "commerce" / package.id / "commerce_package.json"
+    status = (
+        f"{'✅' if package.approved else '⚠️ preview only'} **{package.id}** — {package.approval_reason}\n\n"
+        f"- layout signature `{package.storefront.signature}`\n"
+        f"- {len(package.storefront.gallery)} gallery assets, {len(package.variants)} variants\n"
+        f"- manifest `{manifest}`"
+    )
+    listing = (
+        f"### {package.listing.title}\n\n{package.listing.description}\n\n"
+        f"**SEO title** {package.listing.seo_title}\n\n"
+        f"**SEO description** {package.listing.seo_description}\n\n"
+        f"**Tags** {', '.join(package.listing.tags)}\n\n"
+        f"{package.listing.ai_disclosure}\n\n{package.listing.production_disclosure}"
+    )
+    return status, gallery, listing
+
+
+def commerce_publish_ui(channels: list[str], fulfillment: str, live: bool, active: bool,
+                        pod_native: bool) -> str:
+    from .commerce.errors import CommerceError
+    from .commerce.router import CommerceRouter
+
+    if STATE.last_commerce is None:
+        return "Prepare a package first."
+    try:
+        receipt = CommerceRouter(STATE.settings).publish(
+            STATE.last_commerce, channels=channels or [], fulfillment=fulfillment,
+            dry_run=not live, active=active, pod_native_channel=pod_native,
+        )
+    except CommerceError as error:
+        return f"❌ {error}"
+
+    if not receipt.results:
+        return "Nothing to do — select a channel or a fulfilment provider."
+    lines = [f"**{'LIVE' if live else 'DRY RUN'}** — package `{receipt.package_id}`", ""]
+    lines += [f"- {'✅' if row.ok else '❌'} **{row.platform}** {row.status} {row.message}"
+              for row in receipt.results]
+    lines += [""] + [f"> {warning}" for warning in receipt.warnings]
+    publish_dir = Path(STATE.last_commerce.source_run_dir) / "commerce" / STATE.last_commerce.id / "publish"
+    lines.append(f"\nRequest/response audit: `{publish_dir}`")
+    return "\n".join(lines)
+
+
+def commerce_tab() -> None:
+    gr.Markdown(
+        "### ⑧ Commerce\n"
+        "Commerce starts *after* an approved design, never before — a marketplace deadline cannot "
+        "push an unproven concept through the art system. Publishing is a dry run and a draft "
+        "unless you say otherwise, and an offline rehearsal can be previewed but never listed. "
+        "Research reference pixels stay out of storefronts unless a local manifest marks them "
+        "commerce-safe."
+    )
+    with gr.Accordion("Channel configuration (all optional)", open=False):
+        with gr.Row():
+            brand = gr.Textbox(value=STATE.settings.commerce_brand, label="Brand")
+            base_price = gr.Textbox(value=STATE.settings.commerce_base_price, label="Base price")
+            public_base_url = gr.Textbox(
+                value=STATE.settings.public_asset_base_url, label="Public asset base URL",
+                info="Printful needs a URL-addressable print file; put HTTPS in front of it",
+            )
+        with gr.Row():
+            with gr.Column():
+                gr.Markdown("**Etsy**")
+                etsy_key = gr.Textbox(label="ETSY_API_KEY", type="password")
+                etsy_token = gr.Textbox(label="ETSY_ACCESS_TOKEN", type="password")
+                etsy_shop = gr.Textbox(value=STATE.settings.etsy_shop_id, label="ETSY_SHOP_ID")
+                etsy_taxonomy = gr.Textbox(value=STATE.settings.etsy_taxonomy_id, label="ETSY_TAXONOMY_ID")
+                etsy_shipping = gr.Textbox(value=STATE.settings.etsy_shipping_profile_id,
+                                           label="ETSY_SHIPPING_PROFILE_ID")
+                etsy_readiness = gr.Textbox(value=STATE.settings.etsy_readiness_state_id,
+                                            label="ETSY_READINESS_STATE_ID")
+            with gr.Column():
+                gr.Markdown("**Shopify**")
+                shopify_domain = gr.Textbox(value=STATE.settings.shopify_store_domain,
+                                            label="SHOPIFY_STORE_DOMAIN", placeholder="store.myshopify.com")
+                shopify_token = gr.Textbox(label="SHOPIFY_ACCESS_TOKEN", type="password")
+                shopify_version = gr.Textbox(value=STATE.settings.shopify_api_version,
+                                             label="SHOPIFY_API_VERSION")
+                gr.Markdown(
+                    "Install `integrations/shopify_theme/*.liquid` once for per-listing collage "
+                    "layout. ARCHIVIST never mutates theme code through a product token."
+                )
+            with gr.Column():
+                gr.Markdown("**Printful / Printify**")
+                printful_token = gr.Textbox(label="PRINTFUL_TOKEN", type="password")
+                printful_variants = gr.Textbox(value=STATE.settings.printful_variant_ids,
+                                               label="PRINTFUL_VARIANT_IDS")
+                printify_token = gr.Textbox(label="PRINTIFY_TOKEN", type="password")
+                printify_shop = gr.Textbox(value=STATE.settings.printify_shop_id, label="PRINTIFY_SHOP_ID")
+                printify_blueprint = gr.Textbox(value=STATE.settings.printify_blueprint_id,
+                                                label="PRINTIFY_BLUEPRINT_ID")
+                printify_provider = gr.Textbox(value=STATE.settings.printify_provider_id,
+                                               label="PRINTIFY_PROVIDER_ID")
+                printify_variants = gr.Textbox(value=STATE.settings.printify_variant_ids,
+                                               label="PRINTIFY_VARIANT_IDS")
+        with gr.Row():
+            auto_publish = gr.Checkbox(value=STATE.settings.commerce_auto_publish,
+                                       label="Auto-publish after an approved live run")
+            auto_channels = gr.CheckboxGroup(
+                ["etsy", "shopify"],
+                value=[x for x in STATE.settings.commerce_auto_channels.split(",") if x],
+                label="Auto channels")
+            auto_fulfillment = gr.Radio(["none", "printful", "printify"],
+                                        value=STATE.settings.commerce_auto_fulfillment,
+                                        label="Auto fulfilment")
+            auto_active = gr.Checkbox(value=STATE.settings.commerce_auto_active,
+                                      label="Activate immediately (not draft)")
+            pod_native = gr.Checkbox(value=STATE.settings.commerce_pod_native_channel,
+                                     label="Printify owns the channel binding")
+        save_button = gr.Button("Save commerce configuration", variant="secondary")
+        save_status = gr.Markdown()
+        save_button.click(
+            save_commerce_config,
+            inputs=[brand, base_price, public_base_url, etsy_key, etsy_token, etsy_shop,
+                    etsy_taxonomy, etsy_shipping, etsy_readiness, shopify_domain, shopify_token,
+                    shopify_version, printful_token, printful_variants, printify_token,
+                    printify_shop, printify_blueprint, printify_provider, printify_variants,
+                    auto_publish, auto_channels, auto_fulfillment, auto_active, pod_native],
+            outputs=save_status,
+        )
+
+    gr.Markdown("#### Prepare a package")
+    with gr.Row():
+        run_dir = gr.Textbox(value=commerce_latest_run(), label="Approved run directory", scale=3)
+        refresh = gr.Button("Use latest run", scale=1)
+    with gr.Row():
+        price = gr.Textbox(value=STATE.settings.commerce_base_price, label="Price")
+        sizes = gr.Textbox(value="S,M,L,XL,2XL", label="Sizes")
+        package_brand = gr.Textbox(value=STATE.settings.commerce_brand, label="Brand")
+        use_llm = gr.Checkbox(value=True, label="Polish copy with GPT")
+        allow_rehearsal = gr.Checkbox(value=False, label="Allow unapproved preview")
+    prepare_button = gr.Button("Prepare commerce package", variant="primary")
+    prepare_status = gr.Markdown()
+    gallery = gr.Gallery(label="Generated storefront sequence", columns=5, height=260)
+    listing_preview = gr.Markdown()
+
+    refresh.click(lambda: commerce_latest_run(), outputs=run_dir)
+    prepare_button.click(
+        commerce_prepare_ui,
+        inputs=[run_dir, price, sizes, package_brand, use_llm, allow_rehearsal],
+        outputs=[prepare_status, gallery, listing_preview],
+    )
+
+    gr.Markdown("#### Publish")
+    with gr.Row():
+        channels = gr.CheckboxGroup(["etsy", "shopify"], value=[], label="Sales channels")
+        fulfillment = gr.Radio(["none", "printful", "printify"], value="none", label="Fulfilment")
+        live = gr.Checkbox(value=False, label="Live (real API writes)")
+        active = gr.Checkbox(value=False, label="Activate listing")
+        publish_native = gr.Checkbox(value=False, label="Printify native channel")
+    publish_button = gr.Button("Route package", variant="stop")
+    publish_status = gr.Markdown()
+    publish_button.click(
+        commerce_publish_ui,
+        inputs=[channels, fulfillment, live, active, publish_native],
+        outputs=publish_status,
+    )
+
+
 def deploy_tab() -> None:
     gr.Markdown(
         "### ⑧ Deploy\n"
@@ -1654,7 +1889,9 @@ def build_app() -> gr.Blocks:
                 schedule_tab()
             with gr.Tab("⑦ House V10.1"):
                 house_tab()
-            with gr.Tab("⑧ Deploy"):
+            with gr.Tab("⑧ Commerce"):
+                commerce_tab()
+            with gr.Tab("⑨ Deploy"):
                 deploy_tab()
         gr.Markdown(
             "References are ingredients, never targets — nothing mined is reproduced in the output. "

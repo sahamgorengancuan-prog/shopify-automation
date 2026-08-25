@@ -10,6 +10,8 @@ REM    run_pipeline.bat --volume --roots a,b    compare volume across your terms
 REM    run_pipeline.bat --discover              research only
 REM    run_pipeline.bat "deep sea salvage"      design one named topic
 REM    run_pipeline.bat "deep sea salvage" --garment light --no-generate
+REM    run_pipeline.bat --prepare <run-dir>     build the listing package
+REM    run_pipeline.bat --publish <pkg.json>    route it (dry run unless --live)
 REM    run_pipeline.bat --check                 connection self-test
 REM    run_pipeline.bat --plan "north sea oil"  auto-plan a collection
 REM ===================================================================
@@ -37,6 +39,9 @@ if /i "%~1"=="--house"    set "MODE=house"
 if /i "%~1"=="--volume"   set "MODE=volume"
 if /i "%~1"=="--discover" set "MODE=discover"
 if /i "%~1"=="--plan"     set "MODE=plan"
+if /i "%~1"=="--prepare"  set "MODE=commerce-prepare"
+if /i "%~1"=="--publish"  set "MODE=commerce-publish"
+if /i "%~1"=="--assets"   set "MODE=commerce-assets"
 if defined MODE shift
 if defined MODE goto :collect
 
@@ -65,6 +70,8 @@ echo          run_pipeline.bat --house [options]     V10.1 house system
 echo          run_pipeline.bat --volume --roots a,b  compare volume across terms
 echo          run_pipeline.bat --discover [options]  research only
 echo          run_pipeline.bat "topic" [options]     design one named topic
+echo          run_pipeline.bat --prepare ^<run-dir^>  build a listing package
+echo          run_pipeline.bat --publish ^<pkg^>      route it, dry run by default
 echo          run_pipeline.bat --check
 echo          run_pipeline.bat --plan "theme"
 echo.
