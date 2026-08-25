@@ -15,8 +15,12 @@ DEFAULT_ENV_FILES = (".env", ".env.local")
 
 # Keys that must never be echoed into a manifest, a log line or a notebook cell.
 SECRET_KEYS = (
-    "BFL_API_KEY", "PEXELS_API_KEY", "OPENAI_API_KEY",
+    "HF_TOKEN", "BFL_API_KEY", "PEXELS_API_KEY", "OPENAI_API_KEY",
     "REDDIT_CLIENT_SECRET", "X_BEARER_TOKEN", "META_ACCESS_TOKEN",
+    # Commerce credentials are secrets like any other: a listing token can
+    # create real marketplace objects and charge a real account.
+    "ETSY_API_KEY", "ETSY_ACCESS_TOKEN", "SHOPIFY_ACCESS_TOKEN",
+    "PRINTFUL_TOKEN", "PRINTIFY_TOKEN",
 )
 
 
@@ -137,6 +141,42 @@ class Settings:
     house_require_critic: bool = True
     house_print_statement: bool = False   # V10.1 §11: typography is opt-in
     market_truth_min_confidence: float = 0.70
+
+    # --- commerce (every field optional; publishing is OFF by default) -----
+    # Nothing in the design engine reads these. Commerce begins only after an
+    # approved delivery, so a missing token can never affect a design decision.
+    commerce_brand: str = "ARCHIVIST"
+    commerce_base_price: str = "34.00"
+    commerce_auto_publish: bool = False
+    commerce_auto_channels: str = ""
+    commerce_auto_fulfillment: str = "none"
+    commerce_auto_active: bool = False
+    commerce_pod_native_channel: bool = False
+    public_asset_base_url: str = ""
+
+    etsy_api_key: str = ""
+    etsy_access_token: str = ""
+    etsy_shop_id: str = ""
+    etsy_taxonomy_id: str = ""
+    etsy_shipping_profile_id: str = ""
+    etsy_readiness_state_id: str = ""
+
+    shopify_store_domain: str = ""
+    shopify_access_token: str = ""
+    shopify_api_version: str = "2026-07"
+
+    printful_token: str = ""
+    printful_variant_ids: str = ""
+
+    printify_token: str = ""
+    printify_shop_id: str = ""
+    printify_shop_etsy_id: str = ""
+    printify_shop_shopify_id: str = ""
+    printify_blueprint_id: str = ""
+    printify_provider_id: str = ""
+    printify_variant_ids: str = ""
+    printify_print_position: str = "front"
+    printify_scale: float = 0.85
     house_anchor: str = "auto"            # auto | upper-left | upper-right | low-left | low-right
     house_statement_override: str = ""
 
@@ -210,6 +250,35 @@ class Settings:
             house_allow_concept_retry=_bool("ARCHIVIST_ALLOW_CONCEPT_RETRY", False),
             house_require_critic=_bool("ARCHIVIST_REQUIRE_CRITIC", True),
             market_truth_min_confidence=_float("ARCHIVIST_MARKET_TRUTH_MIN_CONFIDENCE", 0.70),
+            commerce_brand=os.environ.get("ARCHIVIST_COMMERCE_BRAND", "ARCHIVIST").strip() or "ARCHIVIST",
+            commerce_base_price=os.environ.get("ARCHIVIST_COMMERCE_BASE_PRICE", "34.00").strip() or "34.00",
+            commerce_auto_publish=_bool("ARCHIVIST_COMMERCE_AUTO_PUBLISH", False),
+            commerce_auto_channels=os.environ.get("ARCHIVIST_COMMERCE_AUTO_CHANNELS", "").strip(),
+            commerce_auto_fulfillment=(
+                os.environ.get("ARCHIVIST_COMMERCE_AUTO_FULFILLMENT", "none").strip().lower() or "none"),
+            commerce_auto_active=_bool("ARCHIVIST_COMMERCE_AUTO_ACTIVE", False),
+            commerce_pod_native_channel=_bool("ARCHIVIST_COMMERCE_POD_NATIVE_CHANNEL", False),
+            public_asset_base_url=os.environ.get("ARCHIVIST_PUBLIC_ASSET_BASE_URL", "").strip(),
+            etsy_api_key=os.environ.get("ETSY_API_KEY", "").strip(),
+            etsy_access_token=os.environ.get("ETSY_ACCESS_TOKEN", "").strip(),
+            etsy_shop_id=os.environ.get("ETSY_SHOP_ID", "").strip(),
+            etsy_taxonomy_id=os.environ.get("ETSY_TAXONOMY_ID", "").strip(),
+            etsy_shipping_profile_id=os.environ.get("ETSY_SHIPPING_PROFILE_ID", "").strip(),
+            etsy_readiness_state_id=os.environ.get("ETSY_READINESS_STATE_ID", "").strip(),
+            shopify_store_domain=os.environ.get("SHOPIFY_STORE_DOMAIN", "").strip(),
+            shopify_access_token=os.environ.get("SHOPIFY_ACCESS_TOKEN", "").strip(),
+            shopify_api_version=os.environ.get("SHOPIFY_API_VERSION", "2026-07").strip() or "2026-07",
+            printful_token=os.environ.get("PRINTFUL_TOKEN", "").strip(),
+            printful_variant_ids=os.environ.get("PRINTFUL_VARIANT_IDS", "").strip(),
+            printify_token=os.environ.get("PRINTIFY_TOKEN", "").strip(),
+            printify_shop_id=os.environ.get("PRINTIFY_SHOP_ID", "").strip(),
+            printify_shop_etsy_id=os.environ.get("PRINTIFY_SHOP_ETSY_ID", "").strip(),
+            printify_shop_shopify_id=os.environ.get("PRINTIFY_SHOP_SHOPIFY_ID", "").strip(),
+            printify_blueprint_id=os.environ.get("PRINTIFY_BLUEPRINT_ID", "").strip(),
+            printify_provider_id=os.environ.get("PRINTIFY_PROVIDER_ID", "").strip(),
+            printify_variant_ids=os.environ.get("PRINTIFY_VARIANT_IDS", "").strip(),
+            printify_print_position=os.environ.get("PRINTIFY_PRINT_POSITION", "front").strip() or "front",
+            printify_scale=_float("PRINTIFY_SCALE", 0.85),
             house_print_statement=_bool("ARCHIVIST_PRINT_STATEMENT", False),
             house_anchor=os.environ.get("ARCHIVIST_ANCHOR", "auto").strip() or "auto",
             house_statement_override=os.environ.get("ARCHIVIST_STATEMENT", "").strip(),
@@ -294,6 +363,17 @@ class Settings:
                 else "anonymous — set REDDIT_CLIENT_ID/SECRET if your IP is blocked"
             ),
             "x": state(bool(self.x_bearer_token), "X_BEARER_TOKEN"),
+            # Commerce is downstream of an approved design: unconfigured means
+            # "no channel", never "degraded pipeline".
+            "etsy": state(bool(self.etsy_api_key and self.etsy_access_token and self.etsy_shop_id),
+                          "ETSY_API_KEY / ETSY_ACCESS_TOKEN / ETSY_SHOP_ID"),
+            "shopify": state(bool(self.shopify_store_domain and self.shopify_access_token),
+                             "SHOPIFY_STORE_DOMAIN / SHOPIFY_ACCESS_TOKEN"),
+            "printful": state(bool(self.printful_token), "PRINTFUL_TOKEN"),
+            "printify": state(
+                bool(self.printify_token and (self.printify_shop_id or self.printify_shop_etsy_id
+                                              or self.printify_shop_shopify_id)),
+                "PRINTIFY_TOKEN / PRINTIFY_SHOP_ID"),
             "meta": state(bool(self.meta_access_token and self.meta_ig_user_id), "META_ACCESS_TOKEN"),
         }
 
@@ -301,9 +381,11 @@ class Settings:
         out: dict[str, object] = {}
         for key, value in vars(self).items():
             if key in {
-                "bfl_api_key", "pexels_api_key", "openai_api_key",
+                "hf_token", "bfl_api_key", "pexels_api_key", "openai_api_key",
                 "reddit_client_id", "reddit_client_secret", "x_bearer_token",
                 "meta_access_token", "meta_ig_user_id",
+                "etsy_api_key", "etsy_access_token", "shopify_access_token",
+                "printful_token", "printify_token",
             }:
                 out[key] = "set" if value else "unset"
             elif isinstance(value, Path):

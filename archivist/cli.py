@@ -308,6 +308,70 @@ def cmd_runs(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_commerce_prepare(args: argparse.Namespace) -> int:
+    """Turn one approved run into a channel-neutral listing package."""
+    from .commerce.builder import build_commerce_package
+    from .commerce.errors import PackageBuildError
+
+    settings = _settings(args)
+    try:
+        package = build_commerce_package(
+            args.run_dir, settings, base_price=args.price, sizes=args.sizes, brand=args.brand,
+            require_approved=not args.allow_rehearsal, use_llm=not args.no_llm,
+        )
+    except PackageBuildError as error:
+        print(f"stopped: {error}")
+        return 1
+
+    manifest = Path(package.source_run_dir) / "commerce" / package.id / "commerce_package.json"
+    print(f"package : {package.id}")
+    print(f"approved: {'yes' if package.approved else 'NO — preview only'} ({package.approval_reason})")
+    print(f"title   : {package.listing.title}")
+    print(f"layout  : {package.storefront.signature}")
+    print(f"gallery : {len(package.storefront.gallery)} assets")
+    print(f"manifest: {manifest}")
+    return 0
+
+
+def cmd_commerce_publish(args: argparse.Namespace) -> int:
+    """Route a prepared package to the configured channels. Dry-run by default."""
+    from .commerce.builder import package_from_json
+    from .commerce.errors import CommerceError
+    from .commerce.router import CommerceRouter
+
+    settings = _settings(args)
+    package = package_from_json(args.package)
+    try:
+        receipt = CommerceRouter(settings).publish(
+            package, channels=args.channels, fulfillment=args.fulfillment, dry_run=not args.live,
+            active=args.active, pod_native_channel=args.pod_native_channel,
+        )
+    except CommerceError as error:
+        print(f"stopped: {error}")
+        return 1
+
+    if not receipt.results:
+        print("nothing to do — no channel or fulfilment provider was selected")
+        return 0
+    print(f"{'DRY RUN' if not args.live else 'LIVE'} — package {package.id}")
+    for row in receipt.results:
+        print(f"  {row.platform:<10} {row.status:<22} {'OK' if row.ok else 'FAIL'}  {row.message}")
+    for warning in receipt.warnings:
+        print(f"warning: {warning}")
+    return 0 if receipt.ok else 2
+
+
+def cmd_commerce_assets(args: argparse.Namespace) -> int:
+    """Serve staged print files for POD APIs that only accept URLs."""
+    from .commerce.public_assets import serve
+
+    print(f"serving {args.directory} on {args.host}:{args.port}")
+    print("put HTTPS in front of this before pointing Printful at it "
+          "(Caddy, nginx, a tunnel or object storage).")
+    serve(args.directory, host=args.host, port=args.port)
+    return 0
+
+
 def cmd_deploy(args: argparse.Namespace) -> int:
     written = deploy_mod.materialise(
         args.target, port=args.port, image=args.image, user=args.user,
@@ -426,6 +490,37 @@ def build_parser() -> argparse.ArgumentParser:
     runs = sub.add_parser("runs", help="list past runs")
     runs.add_argument("--limit", type=int, default=20)
     runs.set_defaults(func=cmd_runs)
+
+    commerce_prepare = sub.add_parser(
+        "commerce-prepare", help="build SEO, gallery and a channel-neutral package from an approved run")
+    commerce_prepare.add_argument("run_dir")
+    commerce_prepare.add_argument("--price", default=None)
+    commerce_prepare.add_argument("--sizes", default="S,M,L,XL,2XL")
+    commerce_prepare.add_argument("--brand", default=None)
+    commerce_prepare.add_argument("--no-llm", action="store_true")
+    commerce_prepare.add_argument(
+        "--allow-rehearsal", action="store_true",
+        help="build an unpublishable preview from a run that did not pass the gates")
+    commerce_prepare.set_defaults(func=cmd_commerce_prepare)
+
+    commerce_publish = sub.add_parser(
+        "commerce-publish", help="route a prepared package to channels; dry-run unless --live")
+    commerce_publish.add_argument("package", help="path to commerce_package.json")
+    commerce_publish.add_argument("--channels", nargs="*", default=[], choices=["etsy", "shopify"])
+    commerce_publish.add_argument("--fulfillment", default="none", choices=["none", "printful", "printify"])
+    commerce_publish.add_argument("--live", action="store_true", help="perform real API writes")
+    commerce_publish.add_argument("--active", action="store_true",
+                                  help="activate the listing instead of leaving it a draft")
+    commerce_publish.add_argument("--pod-native-channel", action="store_true",
+                                  help="let Printify publish through its own connected Etsy/Shopify shop")
+    commerce_publish.set_defaults(func=cmd_commerce_publish)
+
+    commerce_assets = sub.add_parser(
+        "commerce-assets", help="serve staged print files for Printful; put HTTPS in front of it")
+    commerce_assets.add_argument("directory")
+    commerce_assets.add_argument("--host", default="127.0.0.1")
+    commerce_assets.add_argument("--port", type=int, default=8090)
+    commerce_assets.set_defaults(func=cmd_commerce_assets)
 
     deploy = sub.add_parser("deploy", help="write deployment artefacts")
     deploy.add_argument("--target", default="deploy")

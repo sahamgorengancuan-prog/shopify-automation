@@ -1,0 +1,73 @@
+{% comment %}
+ARCHIVIST V10.2 product-page section.
+One-time theme install. Every product reads archivist.layout_signature and uses
+that signature to alter the editorial gallery rhythm without changing the
+artwork itself. Product purchasing remains fully functional.
+{% endcomment %}
+{% assign sig = product.metafields.archivist.layout_signature | default: 'border-break' %}
+<section class="arc-product arc-product--{{ sig | escape }} page-width" data-archivist-signature="{{ sig | escape }}">
+  <div class="arc-product__media">
+    {% for media in product.media limit: 8 %}
+      <figure class="arc-product__frame arc-product__frame--{{ forloop.index }}">
+        {% case media.media_type %}
+          {% when 'image' %}
+            {{ media | image_url: width: 2200 | image_tag: loading: 'lazy', class: 'arc-product__image', alt: media.alt | default: product.title }}
+          {% when 'video' %}
+            {{ media | media_tag: image_size: '1800x', autoplay: false, loop: false, controls: true, class: 'arc-product__video' }}
+          {% when 'external_video' %}
+            {{ media | external_video_tag: class: 'arc-product__video' }}
+          {% when 'model' %}
+            {{ media | model_viewer_tag: image_size: '1800x', reveal: 'interaction', toggleable: true, class: 'arc-product__video' }}
+        {% endcase %}
+      </figure>
+    {% endfor %}
+  </div>
+
+  <aside class="arc-product__info">
+    {% if section.settings.eyebrow != blank %}<div class="arc-product__eyebrow">{{ section.settings.eyebrow | escape }}</div>{% endif %}
+    <h1>{{ product.title | escape }}</h1>
+    <div class="arc-product__price">{{ product.selected_or_first_available_variant.price | money }}</div>
+    {% if product.description != blank %}<div class="arc-product__description rte">{{ product.description }}</div>{% endif %}
+
+    {% form 'product', product, class: 'arc-product__form' %}
+      {% unless product.has_only_default_variant %}
+        <label for="ArcVariant-{{ section.id }}">{{ section.settings.variant_label | escape }}</label>
+        <select id="ArcVariant-{{ section.id }}" name="id">
+          {% for variant in product.variants %}
+            <option value="{{ variant.id }}" {% if variant == product.selected_or_first_available_variant %}selected{% endif %} {% unless variant.available %}disabled{% endunless %}>
+              {{ variant.title | escape }}{% unless variant.available %} — Sold out{% endunless %}
+            </option>
+          {% endfor %}
+        </select>
+      {% else %}
+        <input type="hidden" name="id" value="{{ product.selected_or_first_available_variant.id }}">
+      {% endunless %}
+      <button type="submit" class="arc-product__add" {% unless product.selected_or_first_available_variant.available %}disabled{% endunless %}>
+        {% if product.selected_or_first_available_variant.available %}{{ section.settings.button_label | escape }}{% else %}Sold out{% endif %}
+      </button>
+    {% endform %}
+
+    <div class="arc-product__signature">ARCHIVIST / {{ sig | replace: '-', ' ' | upcase }}</div>
+  </aside>
+</section>
+
+<style>
+.arc-product{--arc-gap:clamp(12px,1.4vw,24px);display:grid;grid-template-columns:minmax(0,1.55fr) minmax(280px,.65fr);gap:clamp(28px,4vw,72px);align-items:start;padding-block:clamp(24px,4vw,64px)}
+.arc-product__media{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));grid-auto-flow:dense;gap:var(--arc-gap);overflow:visible}
+.arc-product__frame{position:relative;margin:0;overflow:hidden;background:#eee9df;min-height:220px}
+.arc-product__frame img,.arc-product__frame video,.arc-product__frame model-viewer{display:block;width:100%;height:100%;object-fit:cover}
+.arc-product__frame--1{grid-column:span 8;aspect-ratio:4/5}.arc-product__frame--2{grid-column:span 4;aspect-ratio:3/4}.arc-product__frame--3{grid-column:span 5;aspect-ratio:1/1}.arc-product__frame--4{grid-column:span 7;aspect-ratio:7/5}.arc-product__frame--5{grid-column:span 4;aspect-ratio:3/4}.arc-product__frame--6{grid-column:span 8;aspect-ratio:4/3}.arc-product__frame--7,.arc-product__frame--8{grid-column:span 6;aspect-ratio:1/1}
+.arc-product__info{position:sticky;top:24px;padding-top:4px}.arc-product__eyebrow,.arc-product__signature{font-size:11px;letter-spacing:.14em;text-transform:uppercase;opacity:.7}.arc-product__info h1{font-size:clamp(30px,4vw,58px);line-height:.98;margin:14px 0 18px;max-width:12ch}.arc-product__price{font-size:16px;margin-bottom:28px}.arc-product__description{font-size:14px;line-height:1.65;margin-bottom:28px}.arc-product__form{display:grid;gap:12px}.arc-product__form select{width:100%;min-height:46px;padding:10px;background:transparent;border:1px solid currentColor}.arc-product__add{min-height:50px;border:1px solid currentColor;background:currentColor;color:Canvas;padding:12px 18px;cursor:pointer}.arc-product__add[disabled]{opacity:.45;cursor:not-allowed}.arc-product__signature{margin-top:24px}
+/* The six signatures change rhythm, crop and border-breaking — never the source artwork. */
+.arc-product--border-break .arc-product__frame--1{grid-column:2/span 9;overflow:visible}.arc-product--border-break .arc-product__frame--1 img{outline:1px solid currentColor;outline-offset:14px}.arc-product--border-break .arc-product__frame--2{transform:translate(-12%,-6%);z-index:2}
+.arc-product--offset-contact-sheet .arc-product__frame--1{grid-column:span 7}.arc-product--offset-contact-sheet .arc-product__frame--2{grid-column:9/span 4;transform:translateY(12%)}.arc-product--offset-contact-sheet .arc-product__frame--3{grid-column:2/span 4}.arc-product--offset-contact-sheet .arc-product__frame--4{grid-column:6/span 7}
+.arc-product--split-frame .arc-product__media{gap:4px}.arc-product--split-frame .arc-product__frame--1,.arc-product--split-frame .arc-product__frame--2{grid-column:span 6;aspect-ratio:4/5}.arc-product--split-frame .arc-product__frame--3{grid-column:span 12;aspect-ratio:16/9}
+.arc-product--editorial-overlap .arc-product__frame--1{grid-column:span 9}.arc-product--editorial-overlap .arc-product__frame--2{grid-column:8/span 5;transform:translateY(-18%);z-index:3;box-shadow:0 18px 40px rgba(0,0,0,.14)}.arc-product--editorial-overlap .arc-product__frame--3{grid-column:2/span 5;transform:translateY(-8%)}
+.arc-product--vertical-filmstrip .arc-product__frame--1{grid-column:4/span 9}.arc-product--vertical-filmstrip .arc-product__frame--2,.arc-product--vertical-filmstrip .arc-product__frame--3,.arc-product--vertical-filmstrip .arc-product__frame--5{grid-column:1/span 3;aspect-ratio:3/4}.arc-product--vertical-filmstrip .arc-product__frame--4{grid-column:4/span 9}
+.arc-product--corner-window .arc-product__frame--1{grid-column:span 12;aspect-ratio:16/11}.arc-product--corner-window .arc-product__frame--2{grid-column:8/span 5;transform:translateY(-28%);z-index:2;border:10px solid Canvas}.arc-product--corner-window .arc-product__frame--3{grid-column:1/span 6;transform:translateY(-8%)}
+@media(max-width:900px){.arc-product{grid-template-columns:1fr}.arc-product__info{position:static;order:-1}.arc-product__info h1{max-width:none}.arc-product__frame,.arc-product--border-break .arc-product__frame--1,.arc-product--offset-contact-sheet .arc-product__frame--1,.arc-product--offset-contact-sheet .arc-product__frame--2,.arc-product--offset-contact-sheet .arc-product__frame--3,.arc-product--offset-contact-sheet .arc-product__frame--4,.arc-product--split-frame .arc-product__frame--1,.arc-product--split-frame .arc-product__frame--2,.arc-product--split-frame .arc-product__frame--3,.arc-product--editorial-overlap .arc-product__frame--1,.arc-product--editorial-overlap .arc-product__frame--2,.arc-product--editorial-overlap .arc-product__frame--3,.arc-product--vertical-filmstrip .arc-product__frame--1,.arc-product--vertical-filmstrip .arc-product__frame--2,.arc-product--vertical-filmstrip .arc-product__frame--3,.arc-product--vertical-filmstrip .arc-product__frame--4,.arc-product--vertical-filmstrip .arc-product__frame--5,.arc-product--corner-window .arc-product__frame--1,.arc-product--corner-window .arc-product__frame--2,.arc-product--corner-window .arc-product__frame--3{grid-column:span 6;transform:none;aspect-ratio:1/1}.arc-product__frame--1{grid-column:span 12!important;aspect-ratio:4/5!important}.arc-product__media{overflow:hidden}}
+</style>
+
+{% schema %}
+{"name":"ARCHIVIST product editorial","settings":[{"type":"text","id":"eyebrow","label":"Eyebrow","default":"Object study / garment edition"},{"type":"text","id":"variant_label","label":"Variant label","default":"Size"},{"type":"text","id":"button_label","label":"Add-to-cart label","default":"Add to cart"}],"presets":[{"name":"ARCHIVIST product editorial"}]}
+{% endschema %}
